@@ -1,0 +1,43 @@
+{
+  "name": "InfraCow-Mobile",
+  "version": "1.0.0",
+  "scripts": {},
+  "dependencies": {
+    "@expo-google-fonts/be-vietnam-pro": "^0.4.1",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/datetimepicker": "8.6.0",
+    "@react-native-community/netinfo": "11.5.2",
+    "@react-native-picker/picker": "^2.11.4",
+    "@react-navigation/bottom-tabs": "^7.15.9",
+    "@react-navigation/native": "^7.2.2",
+    "@react-navigation/native-stack": "^7.14.11",
+    "axios": "^1.14.0",
+    "expo": "~55.0.26",
+    "expo-blur": "~55.0.14",
+    "expo-file-system": "~55.0.22",
+    "expo-font": "^55.0.7",
+    "expo-image-picker": "~55.0.20",
+    "expo-linear-gradient": "~55.0.14",
+    "expo-print": "~55.0.15",
+    "expo-sharing": "~55.0.20",
+    "expo-sqlite": "~55.0.16",
+    "ndef": "^0.2.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-chart-kit": "^6.12.2",
+    "react-native-gesture-handler": "~2.30.0",
+    "react-native-modal-datetime-picker": "^18.0.0",
+    "react-native-nfc-manager": "^3.17.2",
+    "react-native-reanimated": "4.2.1",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.23.0",
+    "react-native-svg": "15.15.3",
+    "react-native-web": "^0.21.0",
+    "react-native-worklets": "^0.7.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "typescript": "~5.9.2"
+  }
+}
