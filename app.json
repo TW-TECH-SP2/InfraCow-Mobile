@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "extra": {
+      "API_URL": "https://infracow-api-hv24.onrender.com",
+      "eas": {
+        "projectId": "4dae85cb-f5ad-4313-a29c-c8bb4636d885"
+      }
+    },
+    "android": {
+      "package": "com.isabele.infracow"
+    }
+  }
+}
