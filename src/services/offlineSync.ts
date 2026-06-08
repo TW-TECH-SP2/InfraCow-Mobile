@@ -1,6 +1,7 @@
 import cache from './cache';
 import api from './api';
 import { enqueueSerializedRequest } from './offlineQueue';
+import offlineQueue from './offlineQueue';
 
 export type OptimisticUpdateOptions = {
   endpoint: string;
@@ -34,7 +35,6 @@ export async function optimisticUpdate(options: OptimisticUpdateOptions) {
   }
 
   // PASSO 2: Tentar sincronizar com a API em background
-  // Qualquer falha → enfileira para sync posterior (não apaga o dado local)
   try {
     console.log(`[OfflineSync] Attempting ${method.toUpperCase()} ${endpoint}`);
 
@@ -44,13 +44,15 @@ export async function optimisticUpdate(options: OptimisticUpdateOptions) {
         method,
         url: endpoint,
         data: formData,
-        timeout: 60000,
+        timeout: 0, // sem limite — o Render pode demorar para acordar
+        // NÃO usa skipOfflineLogic aqui — o adapter cuida de enfileirar se estiver offline
       });
     } else {
       response = await api.request({
         method,
         url: endpoint,
         data,
+        timeout: 0, // sem limite — o Render pode demorar para acordar
       });
     }
 
@@ -61,6 +63,7 @@ export async function optimisticUpdate(options: OptimisticUpdateOptions) {
 
     if (queued) {
       // O adapter já enfileirou (estava offline) — dado local já está salvo
+      // Marcar o clientTempId na fila para rastrear depois
       console.log(`[OfflineSync] Queued by adapter for ${endpoint}`);
       return { offline: true, data: null, queued: true };
     }
@@ -75,40 +78,35 @@ export async function optimisticUpdate(options: OptimisticUpdateOptions) {
     }
 
     console.log(`[OfflineSync] ${method.toUpperCase()} ${endpoint} synced successfully`);
+
+    // Aproveitar a conexão para processar outros itens pendentes
+    offlineQueue.processQueue();
+
     return { offline: false, data: response.data, queued: false };
 
   } catch (error: any) {
-    // QUALQUER falha (timeout, 5xx, network error, etc.) → enfileirar
-    // O dado já está salvo localmente no passo 1, então o usuário não perde nada
+    // QUALQUER falha de rede ou timeout → enfileirar para tentar depois
+    // O adapter NÃO enfileirou aqui (só faz isso quando definitivamente offline)
+    // então cabe ao offlineSync enfileirar quando há erro de rede real.
     console.warn(`[OfflineSync] API call failed for ${endpoint}, enqueueing:`, error?.message);
 
-    try {
-      if (formData) {
-        await enqueueSerializedRequest({
-          method: options.method,
-          url: options.endpoint,
-          data: formData,
-          clientTempId: options.clientTempId,
-        });
-      } else {
-        await enqueueSerializedRequest({
-          method: options.method,
-          url: options.endpoint,
-          data: options.data,
-          clientTempId: options.clientTempId,
-        });
-      }
-      console.log(`[OfflineSync] Enqueued ${endpoint} for later sync`);
-    } catch (queueError) {
-      console.error(`[OfflineSync] Failed to enqueue ${endpoint}:`, queueError);
-    }
-
-    // Não chamar onError aqui — o item está salvo local e na fila.
-    // Chamar onError causaria um Alert de "erro" mesmo o usuário tendo
-    // cadastrado com sucesso (aparece na tela, vai sincronizar depois).
-    // Só chamar onError se for um erro de validação da API (4xx com response).
+    // Só enfileira se for erro de rede/timeout — erros 4xx (validação) não faz sentido
     const isValidationError =
       error?.response?.status >= 400 && error?.response?.status < 500;
+
+    if (!isValidationError) {
+      try {
+        await enqueueSerializedRequest({
+          method: options.method,
+          url: options.endpoint,
+          data: formData ?? options.data,
+          clientTempId: options.clientTempId,
+        });
+        console.log(`[OfflineSync] Enqueued ${endpoint} for later sync`);
+      } catch (queueError) {
+        console.error(`[OfflineSync] Failed to enqueue ${endpoint}:`, queueError);
+      }
+    }
 
     if (isValidationError && onError) {
       onError(error);
@@ -119,9 +117,6 @@ export async function optimisticUpdate(options: OptimisticUpdateOptions) {
   }
 }
 
-/**
- * Atualiza cache substituindo o item pendente (clientTempId) pelo item real do servidor
- */
 async function updateCache(
   cacheKey: string,
   responseData: any,
@@ -153,7 +148,6 @@ async function updateCache(
     const filename = requestData?._filename ?? null;
     const mimetype = requestData?._mimetype ?? null;
 
-    // Remover o item pendente (clientTempId) e qualquer duplicata do servidor
     cachedList = cachedList.filter((item: any) => {
       const itemId = String(item?.id_fazenda ?? item?.id_animal ?? item?.id ?? '');
       const itemTempId = String(item?.clientTempId ?? '');
@@ -163,7 +157,6 @@ async function updateCache(
       );
     });
 
-    // Adicionar item real do servidor (sem pendingSync)
     cachedList.push({
       ...serverItem,
       localImageUri,

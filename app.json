@@ -6,6 +6,10 @@
         "projectId": "4dae85cb-f5ad-4313-a29c-c8bb4636d885"
       }
     },
+    "updates": {
+      "url": "https://u.expo.dev/4dae85cb-f5ad-4313-a29c-c8bb4636d885"
+    },
+    "runtimeVersion": "1.0.0",
     "android": {
       "package": "com.isabele.infracow"
     }

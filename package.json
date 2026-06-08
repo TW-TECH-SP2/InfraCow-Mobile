@@ -21,6 +21,7 @@
     "expo-print": "~55.0.15",
     "expo-sharing": "~55.0.20",
     "expo-sqlite": "~55.0.16",
+    "expo-updates": "~55.0.24",
     "ndef": "^0.2.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",

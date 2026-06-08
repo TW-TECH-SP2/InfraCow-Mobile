@@ -1,10 +1,12 @@
-﻿import api from './api';
+import api from './api';
 import { deleteImageLocally } from './imageStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { clearSession, getSession, setSession } from '../database/services';
+import { clearPrefix, clearQueue } from '../database/database';
 
 const TOKEN_KEY = '@infracow_token';
+const CACHE_PREFIX = 'cache';
 
 type Credentials = { email: string; password: string };
 
@@ -63,6 +65,18 @@ const extractUser = (data: any) => {
   return null;
 };
 
+// Limpa todo o cache local (fazendas, animais, medições, etc.)
+// Chamado no login e no logout para garantir isolamento entre usuários/sessões
+const clearAllLocalCache = async () => {
+  try {
+    await clearPrefix(CACHE_PREFIX);
+    await clearQueue();
+    console.log('[Auth] Cache local limpo com sucesso');
+  } catch (e) {
+    console.warn('[Auth] Falha ao limpar cache local:', e);
+  }
+};
+
 const signIn = async (credentials: Credentials, remember = true) => {
   try {
     const res = await api.post('/login', {
@@ -78,6 +92,10 @@ const signIn = async (credentials: Credentials, remember = true) => {
     console.log('[Auth] Extracted user:', usuario);
 
     if (token) {
+      // Limpar cache de sessão anterior ANTES de salvar a nova sessão
+      // Isso evita que dados de outro usuário (ou testes antigos) apareçam
+      await clearAllLocalCache();
+
       await AsyncStorage.setItem(TOKEN_KEY, token);
       if (usuario) await saveUser(usuario);
       await persistSessionPatch({ token, user: usuario });
@@ -95,15 +113,8 @@ const updateProfile = async ({ name, email, password, imageAsset }: UpdateProfil
   const hasNewImage = Boolean(imageAsset?.uri);
 
   const buildJsonPayload = () => {
-    const payload: Record<string, any> = {
-      nome: name,
-      email,
-    };
-
-    if (password) {
-      payload.senha = password;
-    }
-
+    const payload: Record<string, any> = { nome: name, email };
+    if (password) payload.senha = password;
     return payload;
   };
 
@@ -111,10 +122,7 @@ const updateProfile = async ({ name, email, password, imageAsset }: UpdateProfil
     const formData = new FormData();
     formData.append('nome', name);
     formData.append('email', email);
-
-    if (password) {
-      formData.append('senha', password);
-    }
+    if (password) formData.append('senha', password);
 
     if (imageAsset?.uri) {
       if (Platform.OS === 'web') {
@@ -143,7 +151,6 @@ const updateProfile = async ({ name, email, password, imageAsset }: UpdateProfil
       const formImagem = await buildFormData('imagem');
       res = await api.put('/perfil', formImagem);
     } catch (firstError: any) {
-      // Some backends still expect `foto` instead of `imagem`.
       const formFoto = await buildFormData('foto');
       res = await api.put('/perfil', formFoto);
     }
@@ -156,14 +163,10 @@ const updateProfile = async ({ name, email, password, imageAsset }: UpdateProfil
     ...(responseUser ?? {}),
     nome: responseUser?.nome ?? name,
     email: responseUser?.email ?? email,
-    imagem:
-      responseUser?.imagem ??
-      responseUser?.foto ??
-      currentUser?.imagem ??
-      currentUser?.foto,
+    imagem: responseUser?.imagem ?? responseUser?.foto ?? currentUser?.imagem ?? currentUser?.foto,
     localImageUri: imageAsset?.localUri ?? currentUser?.localImageUri ?? null,
   };
-  // If user replaced their image, remove previous local file to avoid orphan files
+
   try {
     if (imageAsset?.localUri && currentUser?.localImageUri && currentUser.localImageUri !== imageAsset.localUri) {
       await deleteImageLocally(currentUser.localImageUri);
@@ -181,23 +184,10 @@ const signUp = async (data: any) => {
   console.log('[Auth] Starting signUp with data:', { name: data.name, email: data.email });
   
   try {
-    const payload = {
-      nome: data.name,
-      email: data.email,
-      senha: data.password,
-    };
-    console.log('[Auth] SignUp payload:', payload);
-    
+    const payload = { nome: data.name, email: data.email, senha: data.password };
     const res = await api.post('/usuario', payload);
-    console.log('[Auth] SignUp response status:', res.status);
-    console.log('[Auth] SignUp response data:', JSON.stringify(res.data, null, 2));
-    
     return res.data;
   } catch (error: any) {
-    console.log('[Auth] SignUp error status:', error?.response?.status);
-    console.log('[Auth] SignUp error data:', JSON.stringify(error?.response?.data, null, 2));
-    console.log('[Auth] SignUp error message:', error?.message);
-    console.log('[Auth] SignUp error config URL:', error?.config?.url);
     throw error;
   }
 };
@@ -205,38 +195,26 @@ const signUp = async (data: any) => {
 const signOut = async () => {
   await AsyncStorage.removeItem(TOKEN_KEY);
   await clearSession();
+  await clearAllLocalCache();
   delete api.defaults.headers.common['Authorization'];
 };
 
 const getToken = async () => {
   const token = await AsyncStorage.getItem(TOKEN_KEY);
   if (token) return token;
-
   const session = await getSession<Record<string, any>>();
   return session?.token ?? null;
 };
 
 const getUser = async () => {
   const session = await getSession<Record<string, any>>();
-  if (session?.user) {
-    return session.user;
-  }
-
+  if (session?.user) return session.user;
   return null;
 };
 
 const getLoggedUser = async () => {
-  // Simply return user from local storage (which now has id_usuario from login)
   console.log('[Auth] getLoggedUser: returning user from storage');
   return getUser();
 };
 
-export default {
-  signIn,
-  signUp,
-  signOut,
-  getToken,
-  getUser,
-  getLoggedUser,
-  updateProfile,
-};
+export default { signIn, signUp, signOut, getToken, getUser, getLoggedUser, updateProfile };
