@@ -5,9 +5,11 @@ import React from "react";
 import styles from "./styles";
 import Navbar from "../../components/Navbar";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
-import api from "../../services/api";
 import cache from "../../services/cache";
+import offlineQueue, { syncEvents } from "../../services/offlineQueue";
 import Constants from 'expo-constants';
+import NetInfo from '@react-native-community/netinfo';
+import api from "../../services/api";
 
 type FarmItem = {
   id_fazenda: number | string;
@@ -32,35 +34,16 @@ const getApiBaseUrl = () => {
 
 const resolveFarmImage = (image?: string | null) => {
   if (!image) return FALLBACK_IMAGE;
-
   const normalized = String(image).trim();
   if (!normalized || normalized.toLowerCase() === 'null' || normalized.toLowerCase() === 'undefined') {
     return FALLBACK_IMAGE;
   }
-
-  if (/^https?:\/\//i.test(normalized)) {
-    return { uri: normalized };
-  }
-
+  if (/^https?:\/\//i.test(normalized)) return { uri: normalized };
   const withoutLeadingSlashes = normalized.replace(/^\/+/, '');
   const normalizedPath = withoutLeadingSlashes.replace(/\\/g, '/');
   const path = normalizedPath.startsWith('uploads/') ? normalizedPath : `uploads/${normalizedPath}`;
   const baseUrl = getApiBaseUrl().replace(/\/$/, '');
-
   return { uri: `${baseUrl}/${path}` };
-};
-
-const mergeCachedLocalImages = (freshFarms: FarmItem[], cachedFarms: FarmItem[]) => {
-  return freshFarms.map((farm) => {
-    const cachedFarm = cachedFarms.find((item) => String(item.id_fazenda ?? item.clientTempId ?? '') === String(farm.id_fazenda));
-    return {
-      ...cachedFarm,
-      ...farm,
-      localImageUri: cachedFarm?.localImageUri ?? farm.localImageUri ?? null,
-      pendingSync: cachedFarm?.pendingSync ?? farm.pendingSync ?? false,
-      clientTempId: cachedFarm?.clientTempId ?? farm.clientTempId ?? null,
-    };
-  });
 };
 
 const formatAddress = (farm: FarmItem) => {
@@ -77,10 +60,7 @@ const FarmImage = ({ item }: { item: FarmItem }) => {
     : imgError
     ? FALLBACK_IMAGE
     : resolveFarmImage(item.imagem);
-
-  return (
-    <Image source={src} style={styles.cardImage} onError={() => setImgError(true)} />
-  );
+  return <Image source={src} style={styles.cardImage} onError={() => setImgError(true)} />;
 };
 
 export default function HomeScreen() {
@@ -93,22 +73,35 @@ export default function HomeScreen() {
     setLoading(true);
     setErrorMessage(null);
 
-    const cached = await cache.getCache('/fazendas');
-    const cachedFarms = Array.isArray(cached)
-      ? cached
-      : Array.isArray(cached?.fazendas)
-        ? cached.fazendas
-        : Array.isArray(cached?.data)
-          ? cached.data
+    // 1. Ler cache local primeiro — mostrar imediatamente (inclui pendentes)
+    const cachedRaw = await cache.getCache('/fazendas');
+    const cachedFarms: FarmItem[] = Array.isArray(cachedRaw)
+      ? cachedRaw
+      : Array.isArray(cachedRaw?.fazendas)
+        ? cachedRaw.fazendas
+        : Array.isArray(cachedRaw?.data)
+          ? cachedRaw.data
           : [];
 
     if (cachedFarms.length > 0) {
       setFarms(cachedFarms);
     }
 
+    // 2. Verificar conectividade
+    const netState = await NetInfo.fetch();
+    const isOnline = Boolean(netState.isConnected && netState.isInternetReachable !== false);
+
+    if (!isOnline) {
+      setErrorMessage(cachedFarms.length > 0 ? 'Sem internet — mostrando dados salvos.' : 'Sem internet e sem dados salvos.');
+      setLoading(false);
+      return;
+    }
+
+    // 3. Online: buscar da API
     try {
       const response = await api.get('/fazendas');
-      const farmsData = Array.isArray(response.data)
+
+      const freshFarms: FarmItem[] = Array.isArray(response.data)
         ? response.data
         : Array.isArray(response.data?.fazendas)
           ? response.data.fazendas
@@ -116,26 +109,71 @@ export default function HomeScreen() {
             ? response.data.data
             : [];
 
-      const pendingFarms = cachedFarms.filter((farm) => farm.pendingSync === true);
-      const serverIds = new Set(farmsData.map((farm) => String(farm.id_fazenda)));
-      const trulyPending = pendingFarms.filter(
-        (farm) => !serverIds.has(String(farm.id_fazenda)) && !serverIds.has(String(farm.clientTempId))
-      );
+      const serverIds = new Set(freshFarms.map((f) => String(f.id_fazenda)));
 
-      const merged = mergeCachedLocalImages(farmsData, cachedFarms);
-      const final = [...merged, ...trulyPending];
+      // Preservar itens pendentes que o servidor ainda não confirmou
+      const stillPending = cachedFarms.filter((f) => {
+        if (!f.pendingSync) return false;
+        if (serverIds.has(String(f.id_fazenda))) return false;
+        if (f.clientTempId && serverIds.has(f.clientTempId)) return false;
+        return true;
+      });
+
+      // Mesclar preservando localImageUri do cache local
+      const mergedFresh = freshFarms.map((serverFarm) => {
+        const local = cachedFarms.find(
+          (c) => String(c.id_fazenda) === String(serverFarm.id_fazenda)
+        );
+        return {
+          ...serverFarm,
+          localImageUri: local?.localImageUri ?? serverFarm.localImageUri ?? null,
+          pendingSync: false,
+          clientTempId: null,
+        };
+      });
+
+      const final = [...mergedFresh, ...stillPending];
 
       await cache.setCache('/fazendas', final);
       setFarms(final);
+
+      // Aproveitar conexão para processar fila offline
+      offlineQueue.processQueue();
+
     } catch (err) {
       if (cachedFarms.length === 0) {
-        setErrorMessage('Não foi possível carregar suas fazendas.');
-      } else {
-        setErrorMessage('Mostrando dados salvos offline.');
+        setErrorMessage('Não foi possível carregar fazendas.');
       }
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // ─── Escutar eventos de sync em background ────────────────────────────────
+  // Quando o processQueue sincronizar uma fazenda com o servidor (ex: usuário
+  // cadastrou offline e depois reconectou), atualiza a lista da tela.
+  // Isso é o equivalente do "double tick azul" do WhatsApp — confirmação chega
+  // depois, sem o usuário precisar recarregar.
+  React.useEffect(() => {
+    const refreshFromCache = async () => {
+      const cachedRaw = await cache.getCache('/fazendas');
+      const updated: FarmItem[] = Array.isArray(cachedRaw)
+        ? cachedRaw
+        : Array.isArray(cachedRaw?.fazendas)
+          ? cachedRaw.fazendas
+          : [];
+      if (updated.length > 0) {
+        setFarms(updated);
+      }
+    };
+
+    const sub1 = syncEvents.on('farmSynced', refreshFromCache);
+    const sub2 = syncEvents.on('queueProcessed', refreshFromCache);
+
+    return () => {
+      syncEvents.off('farmSynced', refreshFromCache);
+      syncEvents.off('queueProcessed', refreshFromCache);
+    };
   }, []);
 
   useFocusEffect(
@@ -146,31 +184,24 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-
       <View style={styles.header}>
         <Text style={styles.title}>
           Bem-vindo ao{"\n"}Infracow
         </Text>
-
         <Image
           source={require("../../../assets/logoescura 1.png")}
           style={styles.logo}
         />
       </View>
 
-      <TouchableOpacity style={styles.button}
-        onPress={() => navigation.navigate("RegisterFarm")}
-      >
-        <Image
-          source={require("../../../assets/plus.png")} 
-          style={styles.plus}
-        />
+      <TouchableOpacity style={styles.button} onPress={() => navigation.navigate("RegisterFarm")}>
+        <Image source={require("../../../assets/plus.png")} style={styles.plus} />
         <Text style={styles.buttonText}>Cadastrar nova Fazenda</Text>
       </TouchableOpacity>
 
       <FlatList
         data={farms}
-        keyExtractor={(item) => String(item.id_fazenda)}
+        keyExtractor={(item) => String(item.clientTempId ?? item.id_fazenda)}
         contentContainerStyle={{ paddingBottom: 100 }}
         refreshing={loading}
         onRefresh={loadFarms}
@@ -190,12 +221,15 @@ export default function HomeScreen() {
         renderItem={({ item }) => (
           <View style={styles.card}>
             <FarmImage item={item} />
-
             <View style={styles.cardContent}>
               <Text style={styles.cardTitle}>{item.nome_fazenda}</Text>
               <Text style={styles.cardText}>{formatAddress(item)}</Text>
               <Text style={styles.cardCity}>{item.CEP ? `CEP ${item.CEP}` : ' '}</Text>
-
+              {item.pendingSync && (
+                <Text style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>
+                  Sincronizando...
+                </Text>
+              )}
               <TouchableOpacity
                 style={styles.cardButton}
                 onPress={() => navigation.navigate("Farm", { farm: item })}
@@ -208,8 +242,6 @@ export default function HomeScreen() {
       />
 
       <Navbar active="home" />
-
-
     </View>
   );
 }

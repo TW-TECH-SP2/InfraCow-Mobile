@@ -13,7 +13,7 @@ const getApiUrl = (): string => {
 
 const api = axios.create({
   baseURL: getApiUrl(),
-  timeout: 30000,
+  timeout: 0, // sem limite global — o Render pode demorar para acordar
 });
 
 const isDefinitelyOffline = (state: any) =>
@@ -42,28 +42,36 @@ api.defaults.adapter = async (config: any) => {
   const method = String(config?.method ?? 'get').toLowerCase();
   const cacheKey = cacheKeyForConfig(config);
 
-  // ─── GET: cache-first, background refresh que respeita pendentes ───────────
+  // ─── FLAG: skipOfflineLogic ───────────────────────────────────────────────
+  // Usado pelo processQueue para ir direto na rede sem interceptação offline.
+  // Evita re-enfileiramento e loops.
+  if (config?.skipOfflineLogic) {
+    return baseAdapter(config);
+  }
+
+  // ─── GET ──────────────────────────────────────────────────────────────────
   if (method === 'get') {
-    const cached = await cache.getCache(cacheKey);
-    if (cached !== null && cached !== undefined) {
-      // Dispara refresh em background sem bloquear — mas nunca apaga pendentes
-      void refreshCacheInBackground(config, cacheKey);
-      return buildOfflineResponse(config, cached, 200, true);
+    const state = await NetInfo.fetch();
+
+    if (isDefinitelyOffline(state)) {
+      const cached = await cache.getCache(cacheKey);
+      if (cached !== null && cached !== undefined) {
+        return buildOfflineResponse(config, cached, 200, true);
+      }
+      const fallback = await buildFallbackData(config);
+      if (fallback !== null) return buildOfflineResponse(config, fallback, 200);
+      throw createNetworkError(config, 'Offline and no cached data available.');
     }
 
-    // Sem cache — tentar rede
     try {
-      const state = await NetInfo.fetch();
-      if (isDefinitelyOffline(state)) {
-        const fallback = await buildFallbackData(config);
-        if (fallback !== null) return buildOfflineResponse(config, fallback, 200);
-        throw createNetworkError(config, 'Offline and no cached data available.');
-      }
-
       const response = await baseAdapter(config);
       await cache.setCache(cacheKey, response.data);
       return response;
     } catch (error: any) {
+      const cached = await cache.getCache(cacheKey);
+      if (cached !== null && cached !== undefined) {
+        return buildOfflineResponse(config, cached, 200, true);
+      }
       const fallback = await buildFallbackData(config);
       if (fallback !== null) return buildOfflineResponse(config, fallback, 200);
       throw error;
@@ -71,24 +79,21 @@ api.defaults.adapter = async (config: any) => {
   }
 
   // ─── POST/PUT/PATCH/DELETE ─────────────────────────────────────────────────
+  // Só enfileira aqui se estiver definitivamente offline — evita double-enqueue
+  // com o offlineSync.optimisticUpdate que já lida com falhas de rede.
   try {
     const state = await NetInfo.fetch();
 
-    // Definitivamente offline → enfileirar direto
     if (isDefinitelyOffline(state) && shouldQueueMutatingRequest(config)) {
       await offlineQueue.enqueueSerializedRequest(config);
       return buildOfflineResponse(config, { offline: true, queued: true }, 202);
     }
 
-    const response = await baseAdapter(config);
-    return response;
+    return await baseAdapter(config);
 
   } catch (error: any) {
-    // Falha de rede durante mutação → enfileirar
-    if (shouldQueueMutatingRequest(config)) {
-      await offlineQueue.enqueueSerializedRequest(config);
-      return buildOfflineResponse(config, { offline: true, queued: true }, 202);
-    }
+    // Não enfileira aqui — o offlineSync.optimisticUpdate cuida disso no catch.
+    // Relançar para que o chamador decida o que fazer.
     throw error;
   }
 };
@@ -132,71 +137,6 @@ async function buildFallbackData(config: any) {
   if (url.includes('/perfil')) return { user: null };
 
   return null;
-}
-
-async function refreshCacheInBackground(config: any, cacheKey: string) {
-  try {
-    const state = await NetInfo.fetch();
-    if (isDefinitelyOffline(state)) return;
-
-    const response = await baseAdapter(config);
-    const freshData = response.data;
-
-    // Buscar cache atual para preservar itens pendentes
-    const currentCached = await cache.getCache<any>(cacheKey);
-    const currentList = Array.isArray(currentCached)
-      ? currentCached
-      : Array.isArray(currentCached?.fazendas)
-        ? currentCached.fazendas
-        : Array.isArray(currentCached?.animais)
-          ? currentCached.animais
-          : Array.isArray(currentCached?.data)
-            ? currentCached.data
-            : null;
-
-    if (currentList !== null) {
-      // Separar pendentes do cache atual
-      const pendingItems = currentList.filter((item: any) => item?.pendingSync === true);
-
-      // Lista de IDs que vieram da API
-      const freshList = Array.isArray(freshData)
-        ? freshData
-        : Array.isArray(freshData?.fazendas)
-          ? freshData.fazendas
-          : Array.isArray(freshData?.animais)
-            ? freshData.animais
-            : Array.isArray(freshData?.data)
-              ? freshData.data
-              : null;
-
-      if (freshList !== null && pendingItems.length > 0) {
-        // Filtrar pendentes que a API ainda não conhece (não sincronizados)
-        const freshIds = new Set(
-          freshList.map((item: any) =>
-            String(item?.id_fazenda ?? item?.id_animal ?? item?.id ?? '')
-          )
-        );
-        const trulyPending = pendingItems.filter(
-          (item: any) =>
-            !freshIds.has(String(item?.id_fazenda ?? '')) &&
-            !freshIds.has(String(item?.clientTempId ?? ''))
-        );
-
-        // Salvar: dados da API + pendentes que ainda não foram sincronizados
-        const merged = [...freshList, ...trulyPending];
-        await cache.setCache(cacheKey, merged);
-        console.log(
-          `[api] background refresh: ${freshList.length} from API + ${trulyPending.length} pending`
-        );
-        return;
-      }
-    }
-
-    // Sem pendentes — salvar direto
-    await cache.setCache(cacheKey, freshData);
-  } catch (error) {
-    console.warn('[api] background refresh failed for', cacheKey, error);
-  }
 }
 
 function buildOfflineResponse(config: any, data: any, status = 200, fromCache = false) {

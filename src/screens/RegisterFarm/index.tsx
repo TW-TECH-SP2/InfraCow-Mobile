@@ -53,8 +53,6 @@ export default function RegisterFarm() {
   };
 
   const handleRegister = async () => {
-    console.log('[RegisterFarm] handleRegister started');
-    
     if (!name || !street || !neighborhood || !city || !cep || !number) {
       Alert.alert('Campos obrigatórios', 'Preencha todos os campos obrigatórios.');
       return;
@@ -63,7 +61,6 @@ export default function RegisterFarm() {
     setLoading(true);
 
     try {
-      console.log('[RegisterFarm] getting user...');
       const currentUser = await auth.getLoggedUser();
       const idUsuario = currentUser?.id_usuario ?? currentUser?.idUsuario ?? currentUser?.usuario_id;
 
@@ -73,6 +70,51 @@ export default function RegisterFarm() {
         return;
       }
 
+      const clientTempId = `farm_${Date.now()}`;
+      const localImageUri = imageAsset?.localUri ?? imageAsset?.uri ?? null;
+
+      // ─── PASSO 1: Salvar no cache LOCAL e voltar pra Home imediatamente ───
+      // O usuário não precisa esperar a API — a fazenda aparece na hora.
+      const optimisticFarm = {
+        id_fazenda: clientTempId,
+        clientTempId,
+        pendingSync: true,
+        nome_fazenda: name,
+        rua: street,
+        bairro: neighborhood,
+        cidade: city,
+        CEP: cep,
+        numero: number,
+        localImageUri,
+        imagem: null,
+      };
+
+      const cachedFarmsRaw = await cache.getCache('/fazendas');
+      const cachedFarms = Array.isArray(cachedFarmsRaw)
+        ? cachedFarmsRaw
+        : Array.isArray((cachedFarmsRaw as any)?.fazendas)
+          ? (cachedFarmsRaw as any).fazendas
+          : Array.isArray((cachedFarmsRaw as any)?.data)
+            ? (cachedFarmsRaw as any).data
+            : [];
+
+      const updatedFarms = [
+        ...cachedFarms.filter((f: any) => {
+          const fId = String(f.id_fazenda ?? f.id ?? '');
+          const fTempId = String(f.clientTempId ?? '');
+          return fId !== clientTempId && fTempId !== clientTempId;
+        }),
+        optimisticFarm,
+      ];
+
+      await cache.setCache('/fazendas', updatedFarms);
+
+      // Volta pra Home agora — a fazenda já está no cache, vai aparecer na lista
+      navigation.goBack();
+
+      // ─── PASSO 2: Sincronizar com a API em background (sem await na tela) ─
+      // O usuário já foi embora. Quando terminar, o syncEvent notifica o Home
+      // para atualizar o "Sincronizando..." e substituir o id temporário pelo real.
       const form = new FormData();
       form.append('nome_fazenda', name);
       form.append('rua', street);
@@ -104,9 +146,8 @@ export default function RegisterFarm() {
         }
       }
 
-      const clientTempId = `farm_${Date.now()}`;
-
-      const result = await offlineSync.optimisticUpdate({
+      // NÃO await — roda em background
+      offlineSync.optimisticUpdate({
         endpoint: '/fazendas',
         method: 'post',
         data: {
@@ -116,57 +157,24 @@ export default function RegisterFarm() {
           cidade: city,
           CEP: cep,
           numero: number,
-          _localImageUri: imageAsset?.localUri ?? null,
+          _localImageUri: localImageUri,
           _filename: imageAsset?.fileName ?? null,
           _mimetype: imageAsset?.mimeType ?? null,
         },
         cacheKey: '/fazendas',
         formData: form,
         clientTempId,
-        onOptimisticUpdate: async (farmData) => {
-          const optimisticFarm = {
-            id_fazenda: clientTempId,
-            clientTempId,
-            pendingSync: true,
-            ...farmData,
-            localImageUri: imageAsset?.localUri ?? null,
-          };
-
-          const cachedFarmsRaw = await cache.getCache('/fazendas');
-          const cachedFarms = Array.isArray(cachedFarmsRaw)
-            ? cachedFarmsRaw
-            : Array.isArray(cachedFarmsRaw?.fazendas)
-              ? cachedFarmsRaw.fazendas
-              : Array.isArray(cachedFarmsRaw?.data)
-                ? cachedFarmsRaw.data
-                : [];
-
-          const updated = [
-            ...cachedFarms.filter((f: any) => String(f.id_fazenda ?? f.id) !== clientTempId),
-            optimisticFarm,
-          ];
-
-          await cache.setCache('/fazendas', updated);
-          console.log('[RegisterFarm] Optimistic update done');
-        },
-        onSuccess: async () => {
-          Alert.alert('Sucesso', 'Fazenda cadastrada com sucesso.');
-        },
+        // onOptimisticUpdate não é necessário aqui — já salvamos no cache acima
         onError: (error) => {
+          // Só chega aqui em erros de validação (4xx) — erros de rede vão pra fila
           const message = error?.response?.data?.message || error?.message || 'Erro ao cadastrar fazenda';
-          console.error('[RegisterFarm] Error:', message);
-          Alert.alert('Erro', message);
+          console.warn('[RegisterFarm] Validation error from API:', message);
+          // Não mostra Alert pois o usuário já foi pra Home — o "Sincronizando..." vai continuar
         },
+      }).catch((err) => {
+        // Segurança extra: nunca deixar erro não tratado no background
+        console.warn('[RegisterFarm] Background sync error (handled by queue):', err?.message);
       });
-
-      console.log('[RegisterFarm] Result:', {
-        offline: result.offline,
-        queued: result.queued,
-      });
-
-      setTimeout(() => {
-        navigation.goBack();
-      }, 500);
 
     } catch (error: any) {
       console.error('[RegisterFarm] Unexpected error:', error);
