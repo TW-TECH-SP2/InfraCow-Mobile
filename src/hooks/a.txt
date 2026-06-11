@@ -1,0 +1,9 @@
+fontes
+item1
+httpswww.sruc.ac.ukall-sac-consulting-news-postsbovine-respiratory-disease-brd
+
+item2
+https://www.nadis.org.uk/disease-a-z/cattle/calf-management/respiratory-disease-in-dairy-and-beef-rearer-units/
+
+item3
+https://www.researchgate.net/figure/BRD-affected-calf-showing-mucopurulent-Figure-2-BRD-affected-calf-showing-nasal_fig1_339454347

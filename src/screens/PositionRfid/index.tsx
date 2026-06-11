@@ -1,235 +1,249 @@
-import { View, Image, Alert, Platform } from "react-native";
+import { View, Image, Alert, Platform, TouchableOpacity } from "react-native";
 import Text from "../../components/Text";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import cache from "../../services/cache";
 import api from "../../services/api";
 import styles from "./styles";
 
-// NFC Manager só disponível em mobile - carrega dinamicamente para evitar erro no web bundle
-let NfcManager: any = null;
-const loadNfcManager = () => {
-  if (Platform.OS === 'web') return null;
-  try {
-    return require('react-native-nfc-manager').default;
-  } catch (e) {
-    console.warn('[PositionRfid] NFC Manager não disponível');
-    return null;
-  }
-};
-
-type AnimalLike = {
-  id_animal?: number | string;
-  id?: number | string;
-  nome_animal?: string;
-  nome?: string;
-  codigo?: string | null;
-  genero?: string | null;
-  tipo?: string | null;
-  raca?: string | null;
-};
-
-const extractAnimals = (payload: any): AnimalLike[] => {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.animais)) return payload.animais;
-  if (Array.isArray(payload?.data)) return payload.data;
-  return [];
-};
-
+/**
+ * PositionRfidScreen — leitura NFC/RFID com react-native-nfc-manager v3.x
+ *
+ * Parâmetros (route.params):
+ *   mode: 'identify' | 'register'
+ *     - 'identify': busca o animal no banco e navega para IdentifiedAnimal
+ *     - 'register': devolve o código lido para RegisterAnimal via navigate
+ *   farm: objeto da fazenda (usado no mode 'identify')
+ */
 export default function PositionRfidScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const [nfcAvailable, setNfcAvailable] = useState(Platform.OS !== 'web');
-  const [isReading, setIsReading] = useState(false);
+  const [status, setStatus] = useState<'aguardando' | 'lendo' | 'erro'>('aguardando');
+  const [mensagem, setMensagem] = useState('Aproxime o dispositivo do brinco do animal');
+  const isActiveRef = useRef(true);
 
+  const mode: 'identify' | 'register' = route.params?.mode ?? 'identify';
   const farmId = route.params?.farm?.id_fazenda ?? route.params?.farm?.id ?? null;
 
-  // Se for web, não tenta fazer nada de NFC
+  // Web: NFC não disponível
   if (Platform.OS === 'web') {
     return (
       <View style={styles.container}>
-        <Image
-          source={require("../../../assets/cow-light.png")}
-          style={styles.icon}
-        />
+        <Image source={require("../../../assets/cow-light.png")} style={styles.icon} />
         <Text style={styles.text}>
-          Leitura de brinco (NFC){"\n"}
-          não disponível na web.{"\n\n"}
+          Leitura NFC não disponível na web.{"\n\n"}
           Teste em dispositivo Android.
         </Text>
       </View>
     );
   }
 
-  // Resto do código é só para mobile
-  useEffect(() => {
-    let isActive = true;
+  const cancelar = async () => {
+    isActiveRef.current = false;
+    try {
+      const NfcManager = require('react-native-nfc-manager').default;
+      await NfcManager.cancelTechnologyRequest().catch(() => {});
+    } catch {}
+    navigation.goBack();
+  };
 
-    const setupNfc = async () => {
-      try {
-        const NFC = loadNfcManager();
-        if (!NFC) {
-          setNfcAvailable(false);
-          return;
-        }
+  const lerTag = async () => {
+    let NfcManager: any;
+    let NfcTech: any;
 
-        await NFC.start();
-        setNfcAvailable(true);
-      } catch (err) {
-        console.warn('[PositionRfid] NFC não disponível:', err);
-        setNfcAvailable(false);
-        if (isActive) {
-          Alert.alert('NFC não disponível', 'Seu dispositivo não possui NFC ou está desabilitado.');
-          navigation.goBack();
-        }
-      }
-    };
-
-    setupNfc();
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    // Se não estiver disponível, não tenta ler
-    if (!nfcAvailable) {
-      console.log('[PositionRfid] Pulando leitura NFC (não disponível)');
+    try {
+      const nfcLib = require('react-native-nfc-manager');
+      NfcManager = nfcLib.default;
+      NfcTech = nfcLib.NfcTech;
+    } catch (e) {
+      setMensagem('Biblioteca NFC não disponível neste build.');
+      setStatus('erro');
       return;
     }
 
-    let isActive = true;
+    try {
+      // Inicia o NFC se ainda não foi iniciado
+      await NfcManager.start();
+    } catch (e) {
+      // start() pode lançar se já foi chamado antes — ignorar
+    }
 
-    const readNfc = async () => {
-      try {
-        const NFC = loadNfcManager();
-        if (isReading || !NFC) return;
-        setIsReading(true);
+    // Verifica se NFC está disponível no dispositivo
+    let nfcSupported = false;
+    try {
+      nfcSupported = await NfcManager.isSupported();
+    } catch {}
 
-        console.log('[PositionRfid] Aguardando leitura NFC...');
-        
-        // Prepara para ler uma tag NDEF
-        const tag = await NFC.requestTag();
-        
-        if (!isActive) return;
+    if (!nfcSupported) {
+      setMensagem('Este dispositivo não possui NFC.');
+      setStatus('erro');
+      return;
+    }
 
-        console.log('[PositionRfid] Tag lida:', tag);
-        
-        // Extrai a mensagem NDEF
-        let rfidCode = '';
-        if (tag?.ndefMessage && Array.isArray(tag.ndefMessage)) {
-          for (const record of tag.ndefMessage) {
-            if (record.type === 'T') {
-              // Texto
-              rfidCode = record.payload?.decoded || '';
-              break;
-            } else if (record.type === 'U') {
-              // URI
-              rfidCode = record.payload?.decoded || '';
-              break;
-            }
-          }
+    let nfcEnabled = false;
+    try {
+      nfcEnabled = await NfcManager.isEnabled();
+    } catch {}
+
+    if (!nfcEnabled) {
+      Alert.alert(
+        'NFC desabilitado',
+        'Ative o NFC nas configurações do dispositivo e tente novamente.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+      return;
+    }
+
+    setStatus('lendo');
+    setMensagem('Aproxime o dispositivo do brinco...');
+
+    try {
+      // Solicita tecnologia NDEF (padrão para tags NFC comuns)
+      await NfcManager.requestTechnology(NfcTech.Ndef);
+
+      // Lê a tag
+      const tag = await NfcManager.getTag();
+
+      if (!isActiveRef.current) return;
+
+      console.log('[PositionRfid] Tag lida:', JSON.stringify(tag));
+
+      // Extrai o código da tag
+      let rfidCode = '';
+
+      // Tenta extrair texto do payload NDEF
+      if (tag?.ndefMessage && Array.isArray(tag.ndefMessage) && tag.ndefMessage.length > 0) {
+        const record = tag.ndefMessage[0];
+        if (record?.payload) {
+          // payload é array de bytes — converte para string
+          const payload: number[] = Array.from(record.payload);
+          // Remove o byte de status (primeiro byte em text records)
+          const langCodeLength = payload[0] & 0x3f;
+          const textBytes = payload.slice(1 + langCodeLength);
+          rfidCode = textBytes.map((b: number) => String.fromCharCode(b)).join('').trim();
         }
-
-        // Se não encontrou NDEF, tenta usar o ID da tag como fallback
-        if (!rfidCode && tag?.id) {
-          rfidCode = tag.id.replace(/\s+/g, '').toUpperCase();
-        }
-
-        if (!rfidCode) {
-          if (isActive) {
-            Alert.alert('Erro', 'Não foi possível ler o código do brinco.');
-            setIsReading(false);
-          }
-          return;
-        }
-
-        console.log('[PositionRfid] RFID code extraído:', rfidCode);
-
-        // Busca animal pelo código (RFID) no cache ou API
-        let animal: AnimalLike | null = null;
-        
-        // Tenta cache de todos os animais
-        const cacheKey = "/animais";
-        const cachedAnimalsRaw = await cache.getCache(cacheKey);
-        let allAnimals = extractAnimals(cachedAnimalsRaw);
-
-        // Se não tem em cache, busca da API
-        if (!allAnimals || allAnimals.length === 0) {
-          try {
-            const resp = await api.get('/animais');
-            allAnimals = extractAnimals(resp.data);
-            if (allAnimals.length > 0) {
-              await cache.setCache(cacheKey, allAnimals);
-            }
-          } catch (err) {
-            console.warn('[PositionRfid] Erro ao buscar animais na API:', err);
-            allAnimals = [];
-          }
-        }
-
-        // Filtra apenas animais da fazenda se farmId foi fornecido
-        const farmAnimals = farmId
-          ? allAnimals.filter((a) => String(a.id_fazenda ?? '') === String(farmId))
-          : allAnimals;
-
-        // Busca por código ou ID matching
-        animal = farmAnimals.find((a) => {
-          const animalCode = String(a.codigo ?? '').trim().toUpperCase();
-          const animalId = String(a.id_animal ?? a.id ?? '').trim().toUpperCase();
-          return animalCode === rfidCode || animalId === rfidCode;
-        }) || null;
-
-        if (!animal) {
-          if (isActive) {
-            Alert.alert('Animal não encontrado', `Nenhum animal encontrado com código/ID: ${rfidCode}`);
-            setIsReading(false);
-          }
-          return;
-        }
-
-        console.log('[PositionRfid] Animal encontrado:', animal);
-        
-        if (isActive) {
-          navigation.replace('IdentifiedAnimal', {
-            animal,
-            farm: route.params?.farm,
-          });
-        }
-      } catch (err: any) {
-        console.warn('[PositionRfid] Erro ao ler NFC:', err);
-        if (isActive && !err?.message?.includes('Cancel')) {
-          Alert.alert('Erro na leitura', 'Erro ao ler o brinco. Tente novamente.');
-        }
-        setIsReading(false);
       }
-    };
 
-    readNfc();
+      // Fallback: usa o ID da tag (série de bytes em hex)
+      if (!rfidCode && tag?.id) {
+        rfidCode = Array.from(tag.id as number[])
+          .map((b: number) => b.toString(16).padStart(2, '0'))
+          .join('')
+          .toUpperCase();
+      }
 
+      if (!rfidCode) {
+        setMensagem('Não foi possível extrair o código da tag.');
+        setStatus('erro');
+        return;
+      }
+
+      console.log('[PositionRfid] Código extraído:', rfidCode);
+
+      // ── mode: 'register' ─────────────────────────────────────────────────
+      if (mode === 'register') {
+        navigation.navigate('RegisterAnimal', {
+          farm: route.params?.farm,
+          rfidCode,
+        });
+        return;
+      }
+
+      // ── mode: 'identify' ─────────────────────────────────────────────────
+      setMensagem('Identificando animal...');
+
+      const resp = await api.get('/animais');
+      const allAnimals = Array.isArray(resp.data)
+        ? resp.data
+        : Array.isArray(resp.data?.animais)
+        ? resp.data.animais
+        : [];
+
+      const farmAnimals = farmId
+        ? allAnimals.filter((a: any) => String(a.id_fazenda ?? '') === String(farmId))
+        : allAnimals;
+
+      const animal = farmAnimals.find((a: any) => {
+        const code = String(a.codigo ?? '').trim().toUpperCase();
+        const id = String(a.id_animal ?? a.id ?? '').trim().toUpperCase();
+        return code === rfidCode.toUpperCase() || id === rfidCode.toUpperCase();
+      });
+
+      if (!animal) {
+        Alert.alert(
+          'Animal não encontrado',
+          `Nenhum animal com código: ${rfidCode}`,
+          [
+            { text: 'Tentar novamente', onPress: () => { setStatus('aguardando'); setMensagem('Aproxime o dispositivo do brinco do animal'); lerTag(); } },
+            { text: 'Cancelar', onPress: () => navigation.goBack() },
+          ]
+        );
+        return;
+      }
+
+      navigation.replace('IdentifiedAnimal', {
+        animal,
+        farm: route.params?.farm,
+      });
+
+    } catch (err: any) {
+      if (!isActiveRef.current) return;
+      console.warn('[PositionRfid] Erro:', err);
+
+      const cancelado = err?.message?.toLowerCase().includes('cancel')
+        || err?.message?.toLowerCase().includes('usercancel');
+
+      if (!cancelado) {
+        setMensagem('Erro ao ler o brinco. Tente novamente.');
+        setStatus('erro');
+      } else {
+        navigation.goBack();
+      }
+    } finally {
+      // Sempre libera a tecnologia ao terminar
+      try {
+        const NfcManager2 = require('react-native-nfc-manager').default;
+        await NfcManager2.cancelTechnologyRequest().catch(() => {});
+      } catch {}
+    }
+  };
+
+  // Inicia leitura ao entrar na tela
+  useEffect(() => {
+    isActiveRef.current = true;
+    lerTag();
     return () => {
-      isActive = false;
+      isActiveRef.current = false;
+      try {
+        const NfcManager = require('react-native-nfc-manager').default;
+        NfcManager.cancelTechnologyRequest().catch(() => {});
+      } catch {}
     };
-  }, [nfcAvailable, route.params]);
+  }, []);
 
   return (
     <View style={styles.container}>
-      <Image
-        source={require("../../../assets/cow-light.png")}
-        style={styles.icon}
-      />
+      <Image source={require("../../../assets/cow-light.png")} style={styles.icon} />
 
-      <Text style={styles.text}>
-        Posicione o dispositivo diante do{"\n"}
-        brinco do bovino
-      </Text>
-      
-      {isReading && (
-        <Text style={{ marginTop: 20, fontSize: 12, color: '#666', textAlign: 'center' }}>
-          Lendo...
+      <Text style={styles.text}>{mensagem}</Text>
+
+      {status === 'lendo' && (
+        <Text style={{ marginTop: 16, fontSize: 13, color: '#666', textAlign: 'center' }}>
+          Aguardando leitura...
         </Text>
       )}
+
+      {status === 'erro' && (
+        <TouchableOpacity
+          onPress={() => { setStatus('aguardando'); setMensagem('Aproxime o dispositivo do brinco do animal'); lerTag(); }}
+          style={{ marginTop: 24, backgroundColor: '#282113', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 28 }}
+        >
+          <Text style={{ color: '#fff', fontWeight: 'bold' }}>Tentar novamente</Text>
+        </TouchableOpacity>
+      )}
+
+      <TouchableOpacity onPress={cancelar} style={{ marginTop: 20, padding: 12 }}>
+        <Text style={{ color: '#888', fontSize: 14, textAlign: 'center' }}>Cancelar</Text>
+      </TouchableOpacity>
     </View>
   );
 }

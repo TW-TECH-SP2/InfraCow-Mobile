@@ -16,7 +16,6 @@ import {
 import styles from "./styles";
 import Navbar from "../../components/Navbar";
 import api from "../../services/api";
-import cache from "../../services/cache";
 import auth from "../../services/auth";
 import Constants from "expo-constants";
 import { useNavigation } from "@react-navigation/native";
@@ -135,8 +134,8 @@ export default function NotificationsScreen() {
     const res = await api.get("/notificacoes");
     let animalsSource: any[] = [];
     try {
-      const animalsCache = await cache.getCache("/animais");
-      animalsSource = extractAnimals(animalsCache);
+      const resAnimals = await api.get('/animais');
+      animalsSource = extractAnimals(resAnimals.data);
     } catch {
       animalsSource = [];
     }

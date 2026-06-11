@@ -59,13 +59,8 @@ export default function ReportAnimal() {
           setAnimalData(animalInfo);
         }
 
-        let todasMedicoes: any[] = [];
         const respMedicoes = await api.get('/medicoes');
-        if (respMedicoes.data?.medicoes && Array.isArray(respMedicoes.data.medicoes)) {
-          todasMedicoes = respMedicoes.data.medicoes;
-        } else if (Array.isArray(respMedicoes.data)) {
-          todasMedicoes = respMedicoes.data;
-        }
+        const todasMedicoes: any[] = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
 
         const medicoesDoAnimal = todasMedicoes
           .filter((m: any) => String(m.id_animal) === String(animalId))

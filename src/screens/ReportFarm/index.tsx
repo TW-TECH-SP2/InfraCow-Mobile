@@ -9,7 +9,6 @@ import styles from "./styles";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useEffect, useState } from "react";
 import api from "../../services/api";
-import cache from "../../services/cache";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
@@ -48,50 +47,16 @@ export default function ReportFarm() {
         return;
       }
 
-      let allAnimals: any[] = [];
-      const cachedAnimalsRaw = await cache.getCache('/animais');
-      if (Array.isArray(cachedAnimalsRaw)) {
-        allAnimals = cachedAnimalsRaw;
-      } else if (cachedAnimalsRaw?.animais && Array.isArray(cachedAnimalsRaw.animais)) {
-        allAnimals = cachedAnimalsRaw.animais;
-      } else if (cachedAnimalsRaw?.data && Array.isArray(cachedAnimalsRaw.data)) {
-        allAnimals = cachedAnimalsRaw.data;
-      }
-
-      if (!allAnimals || allAnimals.length === 0) {
-        const resp = await api.get('/animais');
-        if (Array.isArray(resp.data)) {
-          allAnimals = resp.data;
-        } else if (resp.data?.animais) {
-          allAnimals = resp.data.animais;
-        } else if (resp.data?.data) {
-          allAnimals = resp.data.data;
-        }
-        if (allAnimals.length > 0) await cache.setCache('/animais', allAnimals);
-      }
+      const resp = await api.get('/animais');
+      const allAnimals = Array.isArray(resp.data) ? resp.data : Array.isArray(resp.data?.animais) ? resp.data.animais : [];
 
       const animaisDaFazenda = allAnimals.filter((a: any) => {
         const aFarmId = String(a.id_fazenda ?? a.farm_id ?? a.fazenda_id ?? '').trim();
         return aFarmId === String(farmId);
       });
 
-      let todasMedicoes: any[] = [];
-      const cachedMedicoes = await cache.getCache('/medicoes');
-      if (cachedMedicoes?.medicoes && Array.isArray(cachedMedicoes.medicoes)) {
-        todasMedicoes = cachedMedicoes.medicoes;
-      } else if (Array.isArray(cachedMedicoes)) {
-        todasMedicoes = cachedMedicoes;
-      }
-
-      if (todasMedicoes.length === 0) {
-        const respMedicoes = await api.get('/medicoes');
-        if (respMedicoes.data?.medicoes && Array.isArray(respMedicoes.data.medicoes)) {
-          todasMedicoes = respMedicoes.data.medicoes;
-        } else if (Array.isArray(respMedicoes.data)) {
-          todasMedicoes = respMedicoes.data;
-        }
-        if (todasMedicoes.length > 0) await cache.setCache('/medicoes', todasMedicoes);
-      }
+      const respMedicoes = await api.get('/medicoes');
+      const todasMedicoes = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
 
       const mapped: AnimalRow[] = animaisDaFazenda.map((a: any) => {
         const idAnimal = a.id_animal ?? a.id;

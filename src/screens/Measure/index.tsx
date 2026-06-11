@@ -7,11 +7,9 @@ import {
 } from "react-native";
 import { useState } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import NetInfo from '@react-native-community/netinfo';
 import styles from "./styles";
 import api from "../../services/api";
-import offlineQueue from "../../services/offlineQueue";
-import { startMockMeasurement, MeasurementResult } from "../../services/measurementDevice";
+import { startUsbMeasurement, MeasurementResult } from "../../services/measurementDevice";
 
 type MeasureParams = {
   farm?: any;
@@ -21,78 +19,68 @@ type MeasureParams = {
 export default function MeasureScreen() {
   const route = useRoute<any>();
   const { animal, farm } = (route.params ?? {}) as MeasureParams;
+
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "warning">("idle");
   const [temperatureText, setTemperatureText] = useState("--");
   const [resultMessage, setResultMessage] = useState("Toque em iniciar para começar a medição.");
   const [lastTemperature, setLastTemperature] = useState<number | null>(null);
   const [recordSaved, setRecordSaved] = useState(false);
-  const navigation = useNavigation<any>();
 
-  const getTemperatureValue = (value: string) => {
-    const parsed = Number(String(value).replace("°", ""));
-    return Number.isFinite(parsed) ? parsed : null;
-  };
+  const navigation = useNavigation<any>();
 
   const saveMeasurement = async (temperature: number) => {
     const idAnimal = animal?.id_animal ?? animal?.id ?? null;
     if (!idAnimal) return;
 
+    const now = new Date().toISOString();
+
+    // Campos da tabela medicoes:
+    // id_medicao (auto), createdAt (auto), updatedAt (auto)
+    // datahora, id_animal, temp
     const payload = {
       temp: temperature,
-      datahora: new Date().toISOString(),
+      datahora: now,
       id_animal: idAnimal,
     };
 
-    const networkState = await NetInfo.fetch();
-    const isConnected = Boolean(networkState.isConnected);
-
-    if (!isConnected) {
-      await offlineQueue.enqueue({
-        id: `medicao_${Date.now()}`,
-        endpoint: "/medicoes",
-        method: "post",
-        fields: payload,
-      });
-      return;
-    }
-
-    await api.post("/medicoes", payload, { timeout: 30000 });
+    await api.post("/medicoes", payload);
   };
 
   const handleMeasure = async () => {
+    // Estado resultado → finaliza e salva
     if (status === "success" || status === "warning") {
-      if (lastTemperature !== null && !recordSaved) {
-        try {
+      try {
+        if (lastTemperature !== null && !recordSaved) {
           await saveMeasurement(lastTemperature);
           setRecordSaved(true);
-        } catch (saveError) {
-          setResultMessage("Não foi possível salvar o registro da medição.");
-          return;
         }
+      } catch (_) {
+        // Erro no save não bloqueia a navegação
       }
-
-      navigation.navigate("Home");
+      navigation.navigate("Animal", { animal, farm });
       return;
     }
 
+    // Estado idle → inicia medição
     try {
       setStatus("loading");
       setTemperatureText("...");
-      setResultMessage("Aguardando resposta do dispositivo...");
-
-      const response: MeasurementResult = await startMockMeasurement(animal);
-      setStatus(response.status);
-      const formattedTemperature = `${response.temperature.toFixed(1)}°`;
-      setTemperatureText(formattedTemperature);
-      setLastTemperature(response.temperature);
+      setResultMessage("Medindo... aguarde 10 segundos.");
+      setLastTemperature(null);
       setRecordSaved(false);
+
+      const response: MeasurementResult = await startUsbMeasurement();
+
+      setLastTemperature(response.temperature);
+      setTemperatureText(`${response.temperature.toFixed(1)}°`);
       setResultMessage(response.message);
-    } catch (error) {
+      setStatus(response.status); // "success" ou "warning" — mostra o resultado
+    } catch (error: any) {
       setStatus("idle");
       setTemperatureText("--");
       setLastTemperature(null);
       setRecordSaved(false);
-      setResultMessage("Não foi possível concluir a medição.");
+      setResultMessage(error?.message ?? "Não foi possível concluir a medição.");
     }
   };
 
@@ -106,49 +94,27 @@ export default function MeasureScreen() {
 
   const getTitle = () => {
     switch (status) {
-      case "loading":
-        return "Carregando...";
-      case "success":
-        return "Temperatura Normal!";
-      case "warning":
-        return "Temperatura Anormal!";
-      default:
-        return "Inicie a medição";
+      case "loading": return "Medindo...";
+      case "success": return "Temperatura Normal!";
+      case "warning": return "Temperatura Anormal!";
+      default: return "Inicie a medição";
     }
   };
 
   const getButtonText = () => {
     switch (status) {
-      case "loading":
-        return "Medindo, aguarde...";
+      case "loading": return "Medindo, aguarde...";
       case "success":
-      case "warning":
-        return "Finalizar"; 
-      default:
-        return "Iniciar medição";
+      case "warning": return "Finalizar";
+      default: return "Iniciar medição";
     }
   };
 
   const getCircleImage = () => {
     switch (status) {
-      case "success":
-        return require("../../../assets/eyemeasure-green.png");
-      case "warning":
-        return require("../../../assets/eyemeasure-red.png");
-      default:
-        return require("../../../assets/eyemeasure-brown.png");
-    }
-  };
-
-  const getMeasureText = () => {
-    switch (status) {
-      case "loading":
-        return "...";
-      case "success":
-      case "warning":
-        return temperatureText;
-      default:
-        return "--";
+      case "success": return require("../../../assets/eyemeasure-green.png");
+      case "warning": return require("../../../assets/eyemeasure-red.png");
+      default: return require("../../../assets/eyemeasure-brown.png");
     }
   };
 
@@ -163,9 +129,10 @@ export default function MeasureScreen() {
       <View style={styles.content}>
         <View style={styles.circleContainer}>
           <Image source={getCircleImage()} style={styles.circle} />
-
           <View style={styles.overlay}>
-            <Text style={styles.measureText}>{getMeasureText()}</Text>
+            <Text style={styles.measureText}>
+              {status === "loading" ? "..." : status === "idle" ? "--" : temperatureText}
+            </Text>
           </View>
         </View>
 
@@ -182,14 +149,8 @@ export default function MeasureScreen() {
         </TouchableOpacity>
 
         {(status === "success" || status === "warning") && (
-          <TouchableOpacity
-            style={styles.retryContainer}
-            onPress={handleRetry}
-          >
-            <Image
-              source={require("../../../assets/retry.png")} 
-              style={styles.retryIcon}
-            />
+          <TouchableOpacity style={styles.retryContainer} onPress={handleRetry}>
+            <Image source={require("../../../assets/retry.png")} style={styles.retryIcon} />
             <Text style={styles.retryText}>Tentar novamente</Text>
           </TouchableOpacity>
         )}
