@@ -2,11 +2,9 @@ import api from './api';
 import { deleteImageLocally } from './imageStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { clearSession, getSession, setSession } from '../database/services';
-import { clearPrefix, clearQueue } from '../database/database';
 
+const SESSION_STORAGE_KEY = '@infracow_kv:session:active';
 const TOKEN_KEY = '@infracow_token';
-const CACHE_PREFIX = 'cache';
 
 type Credentials = { email: string; password: string };
 
@@ -19,62 +17,51 @@ type UpdateProfilePayload = {
 
 const saveUser = async (user: any) => {
   if (!user || typeof user !== 'object') return;
-  const currentSession = (await getSession<Record<string, any>>()) ?? {};
-  await setSession({ ...currentSession, user });
+  try {
+    const raw = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
+    const currentSession = raw ? JSON.parse(raw) : {};
+    await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ ...currentSession, user }));
+  } catch (e) {
+    console.warn('saveUser error', e);
+  }
 };
 
 const persistSessionPatch = async (patch: Record<string, any>) => {
-  const currentSession = (await getSession<Record<string, any>>()) ?? {};
-  await setSession({ ...currentSession, ...patch });
+  try {
+    const raw = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
+    const currentSession = raw ? JSON.parse(raw) : {};
+    await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ ...currentSession, ...patch }));
+  } catch (e) {
+    console.warn('persistSessionPatch error', e);
+  }
 };
 
 const extractUser = (data: any) => {
-  console.log('[Auth] extractUser input:', JSON.stringify(data, null, 2));
-  
   if (data?.usuario) {
-    const result = {
+    return {
       id_usuario: data.usuario.id ?? data.usuario.id_usuario,
       nome: data.usuario.nome,
       email: data.usuario.email,
       imagem: data.usuario.imagem ?? data.usuario.foto,
     };
-    console.log('[Auth] extracted from data.usuario:', result);
-    return result;
   }
   if (data?.user) {
-    const result = {
+    return {
       id_usuario: data.user.id ?? data.user.id_usuario,
       nome: data.user.nome,
       email: data.user.email,
       imagem: data.user.imagem ?? data.user.foto,
     };
-    console.log('[Auth] extracted from data.user:', result);
-    return result;
   }
   if (data?.nome || data?.email) {
-    const result = {
+    return {
       id_usuario: data.id ?? data.id_usuario,
       nome: data.nome,
       email: data.email,
       imagem: data.imagem ?? data.foto,
     };
-    console.log('[Auth] extracted from data directly:', result);
-    return result;
   }
-  console.log('[Auth] extractUser could not extract user from data');
   return null;
-};
-
-// Limpa todo o cache local (fazendas, animais, medições, etc.)
-// Chamado no login e no logout para garantir isolamento entre usuários/sessões
-const clearAllLocalCache = async () => {
-  try {
-    await clearPrefix(CACHE_PREFIX);
-    await clearQueue();
-    console.log('[Auth] Cache local limpo com sucesso');
-  } catch (e) {
-    console.warn('[Auth] Falha ao limpar cache local:', e);
-  }
 };
 
 const signIn = async (credentials: Credentials, remember = true) => {
@@ -84,24 +71,21 @@ const signIn = async (credentials: Credentials, remember = true) => {
       senha: credentials.password,
     });
 
-    console.log('[Auth] Login response from backend:', JSON.stringify(res.data, null, 2));
-
     const token = res.data?.token;
     const usuario = extractUser(res.data);
 
-    console.log('[Auth] Extracted user:', usuario);
-
-    if (token) {
-      // Limpar cache de sessão anterior ANTES de salvar a nova sessão
-      // Isso evita que dados de outro usuário (ou testes antigos) apareçam
-      await clearAllLocalCache();
-
-      await AsyncStorage.setItem(TOKEN_KEY, token);
-      if (usuario) await saveUser(usuario);
-      await persistSessionPatch({ token, user: usuario });
+    if (!token) {
+      throw new Error('Token não retornado pelo servidor');
     }
 
-    if (token) api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    await AsyncStorage.setItem(TOKEN_KEY, token);
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+    try {
+      await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ token, user: usuario }));
+    } catch (e) {
+      console.warn('Error saving session', e);
+    }
 
     return { token, user: usuario, offline: false };
   } catch (err) {
@@ -181,40 +165,54 @@ const updateProfile = async ({ name, email, password, imageAsset }: UpdateProfil
 };
 
 const signUp = async (data: any) => {
-  console.log('[Auth] Starting signUp with data:', { name: data.name, email: data.email });
-  
-  try {
-    const payload = { nome: data.name, email: data.email, senha: data.password };
-    const res = await api.post('/usuario', payload);
-    return res.data;
-  } catch (error: any) {
-    throw error;
-  }
+  const payload = { nome: data.name, email: data.email, senha: data.password };
+  const res = await api.post('/usuario', payload);
+  return res.data;
 };
 
 const signOut = async () => {
   await AsyncStorage.removeItem(TOKEN_KEY);
-  await clearSession();
-  await clearAllLocalCache();
+  try {
+    await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch (e) {
+    console.warn('Error clearing session', e);
+  }
   delete api.defaults.headers.common['Authorization'];
 };
 
 const getToken = async () => {
   const token = await AsyncStorage.getItem(TOKEN_KEY);
   if (token) return token;
-  const session = await getSession<Record<string, any>>();
-  return session?.token ?? null;
+  try {
+    const raw = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
+    const session = raw ? JSON.parse(raw) : null;
+    return session?.token ?? null;
+  } catch (e) {
+    return null;
+  }
 };
 
 const getUser = async () => {
-  const session = await getSession<Record<string, any>>();
-  if (session?.user) return session.user;
-  return null;
+  try {
+    const raw = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
+    const session = raw ? JSON.parse(raw) : null;
+    if (session?.user) return session.user;
+    return null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const restoreToken = async () => {
+  const token = await getToken();
+  if (token) {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  }
+  return token;
 };
 
 const getLoggedUser = async () => {
-  console.log('[Auth] getLoggedUser: returning user from storage');
   return getUser();
 };
 
-export default { signIn, signUp, signOut, getToken, getUser, getLoggedUser, updateProfile };
+export default { signIn, signUp, signOut, getToken, getUser, getLoggedUser, updateProfile, restoreToken, saveUserData: saveUser };

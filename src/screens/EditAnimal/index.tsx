@@ -5,9 +5,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
 import { saveImageLocally } from "../../services/imageStorage";
-import cache from "../../services/cache";
-import auth from "../../services/auth";
-import offlineSync from "../../services/offlineSync";
+import api from "../../services/api";
 import Constants from "expo-constants";
 import Navbar from "../../components/Navbar";
 
@@ -112,13 +110,6 @@ export default function EditAnimal() {
     setLoading(true);
 
     try {
-      const currentUser = await auth.getLoggedUser();
-
-      if (!currentUser?.id_usuario) {
-        Alert.alert('Sessão inválida', 'Faça login novamente.');
-        return;
-      }
-
       const form = new FormData();
       if (name) form.append('nome_animal', name);
       if (codigo) form.append('codigo', codigo);
@@ -151,63 +142,14 @@ export default function EditAnimal() {
         }
       }
 
-      const clientTempId = `animal_edit_${animalId}_${Date.now()}`;
-
-      await offlineSync.optimisticUpdate({
-        endpoint: `/animais/${animalId}`,
-        method: 'put',
-        data: {
-          nome_animal: name,
-          codigo: codigo || null,
-          genero,
-          tipo,
-          raca,
-          peso: String(peso),
-          idade: String(idade),
-        },
-        cacheKey: '/animais',
-        formData: form,
-        clientTempId,
-        onOptimisticUpdate: async (updatedData) => {
-          const optimisticAnimal = {
-            ...animal,
-            ...updatedData,
-            localImageUri: imageAsset?.localUri ?? foto ?? null,
-          };
-
-          const cachedAnimalsRaw = await cache.getCache('/animais');
-          const cachedAnimals = Array.isArray(cachedAnimalsRaw)
-            ? cachedAnimalsRaw
-            : Array.isArray(cachedAnimalsRaw?.animais)
-              ? cachedAnimalsRaw.animais
-              : Array.isArray(cachedAnimalsRaw?.data)
-                ? cachedAnimalsRaw.data
-                : [];
-
-          const updated = [
-            ...cachedAnimals.filter((a: any) => String(a.id_animal ?? a.id) !== String(animalId)),
-            optimisticAnimal,
-          ];
-
-          await cache.setCache('/animais', updated);
-        },
-        onSuccess: async () => {
-          Alert.alert('Sucesso', 'Animal atualizado com sucesso.');
-        },
-        onError: (error) => {
-          const message = error?.response?.data?.message || error?.message || 'Erro ao atualizar animal';
-          console.error('EditAnimal Error:', message);
-          Alert.alert('Erro', message);
-        },
-      });
-
-      setTimeout(() => {
-        navigation.goBack();
-      }, 500);
+      await api.put(`/animais/${animalId}`, form);
+      Alert.alert('Sucesso', 'Animal atualizado com sucesso.', [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
 
     } catch (error: any) {
       console.error('EditAnimal Unexpected error:', error);
-      Alert.alert('Erro', 'Erro inesperado ao atualizar animal');
+      Alert.alert('Erro', error?.response?.data?.message || error?.message || 'Erro inesperado ao atualizar animal');
     } finally {
       setLoading(false);
     }

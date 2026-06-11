@@ -3,6 +3,33 @@ import { useEffect, useState } from "react";
 import styles from "./styles";
 import auth from "../../services/auth";
 import api from "../../services/api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// Remove todas as chaves do sistema offline antigo (IDs locais como farm_XXXXX)
+// Roda apenas uma vez; na segunda abertura a flag já existe e pula
+const MIGRATION_KEY = '@infracow_migration_v2_done';
+
+const clearLegacyOfflineData = async () => {
+  try {
+    const done = await AsyncStorage.getItem(MIGRATION_KEY);
+    if (done === 'true') return;
+
+    const allKeys = await AsyncStorage.getAllKeys();
+    const legacyKeys = allKeys.filter((k) =>
+      k.startsWith('@infracow_kv:') &&
+      k !== '@infracow_kv:session:active'   // mantém a sessão (token + user)
+    );
+
+    if (legacyKeys.length > 0) {
+      await AsyncStorage.multiRemove(legacyKeys);
+      console.log('[Splash] Limpeza offline legado:', legacyKeys.length, 'chaves removidas');
+    }
+
+    await AsyncStorage.setItem(MIGRATION_KEY, 'true');
+  } catch (e) {
+    console.warn('[Splash] Erro na limpeza legado:', e);
+  }
+};
 
 export default function SplashScreen({ navigation }: any) {
   const [showLogo, setShowLogo] = useState(false);
@@ -14,6 +41,9 @@ export default function SplashScreen({ navigation }: any) {
     const checkSession = async () => {
       setShowLogo(true);
       const startedAt = Date.now();
+
+      // Limpa dados offline antigos (só na primeira vez)
+      await clearLegacyOfflineData();
 
       const token = await auth.getToken();
       if (token) api.defaults.headers.common['Authorization'] = `Bearer ${token}`;

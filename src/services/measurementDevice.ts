@@ -1,9 +1,10 @@
-type MeasurementTarget = {
-  id?: number | string | null;
-  nome_animal?: string | null;
-  nome?: string | null;
-  genero?: string | null;
-};
+import {
+  Serialport,
+  initSerialport,
+  ReturnedDataType,
+  DriverType,
+  Mode,
+} from "@serserm/react-native-turbo-serialport";
 
 export type MeasurementResult = {
   temperature: number;
@@ -11,39 +12,146 @@ export type MeasurementResult = {
   message: string;
 };
 
-const normalizeText = (value?: string | null) => String(value ?? "").trim().toLowerCase();
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const seedFromTarget = (target?: MeasurementTarget | null) => {
-  const key = `${target?.id ?? ""}-${target?.nome_animal ?? target?.nome ?? ""}-${target?.genero ?? ""}`;
-  let seed = 0;
-  for (let index = 0; index < key.length; index += 1) {
-    seed = (seed + key.charCodeAt(index) * (index + 1)) % 9973;
-  }
-  return seed;
+type EspReading = {
+  objeto_C: number;
+  ambiente_C: number;
 };
 
-export async function startMockMeasurement(target?: MeasurementTarget | null): Promise<MeasurementResult> {
-  const seed = seedFromTarget(target);
-  const genre = normalizeText(target?.genero);
-  const baseTemperature = genre.includes("mach") || genre === "m" ? 38.6 : 38.2;
-  const variation = (seed % 9) / 10;
-  const isWarning = seed % 4 === 0;
+type EspResponse = {
+  leituras: EspReading[];
+};
 
-  await wait(3500);
+const BAUD_RATE = 115200;
+const MEASUREMENT_TIMEOUT_MS = 16000;
 
-  const temperature = Number((baseTemperature + variation + (isWarning ? 1.3 : 0)).toFixed(1));
+// Instância única — inicializada uma vez no módulo
+const serialport = new Serialport();
 
-  return {
-    temperature,
-    status: isWarning ? "warning" : "success",
-    message: isWarning
-      ? "Temperatura acima do esperado."
-      : "Temperatura dentro do esperado.",
-  };
+initSerialport({
+  autoConnect: false,
+  mode: Mode.ASYNC,
+  params: {
+    driver: DriverType.AUTO,
+    baudRate: BAUD_RATE,
+    returnedDataType: ReturnedDataType.UTF8,
+  },
+});
+
+function classifyTemperature(temp: number): Pick<MeasurementResult, "status" | "message"> {
+  if (temp >= 39.5) {
+    return { status: "warning", message: "Temperatura acima do esperado." };
+  }
+  return { status: "success", message: "Temperatura dentro do esperado." };
+}
+
+export async function startUsbMeasurement(): Promise<MeasurementResult> {
+  // Garante que qualquer listener anterior foi removido ANTES de criar novo
+  // Isso evita múltiplos listeners acumulados entre medições
+  try { serialport.stopListening(); } catch (_) {}
+
+  // Pequena pausa para o Android estabilizar
+  await new Promise((res) => setTimeout(res, 300));
+
+  return new Promise(async (resolve, reject) => {
+    let receivedData = "";
+    let settled = false;
+    let connectedDeviceId = -1;
+    let connectedPortInterface = 0;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (timeoutHandle) { clearTimeout(timeoutHandle); timeoutHandle = null; }
+      // Para de escutar ANTES de desconectar para não receber eventos de desconexão
+      try { serialport.stopListening(); } catch (_) {}
+      if (connectedDeviceId !== -1) {
+        try { serialport.disconnect(connectedDeviceId); } catch (_) {}
+      }
+    };
+
+    const finish = (result: MeasurementResult) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+
+    const fail = (msg: string) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(msg));
+    };
+
+    timeoutHandle = setTimeout(() => {
+      fail("Timeout: o dispositivo não respondeu a tempo.");
+    }, MEASUREMENT_TIMEOUT_MS);
+
+    // Registra o listener ANTES de conectar para não perder o onConnected
+    serialport.startListening(({ type, deviceId, portInterface, errorCode, errorMessage, data }) => {
+      if (settled) return; // ignora eventos após encerrado
+
+      switch (type) {
+        case "onConnected": {
+          connectedDeviceId = deviceId ?? connectedDeviceId;
+          connectedPortInterface = portInterface ?? 0;
+          serialport.writeString("MEDIR\n", connectedDeviceId, connectedPortInterface);
+          break;
+        }
+
+        case "onReadData": {
+          receivedData += data ?? "";
+
+          if (receivedData.includes("\n")) {
+            const line = receivedData.split("\n")[0].trim();
+            try {
+              const parsed: EspResponse = JSON.parse(line);
+              const leituras = parsed?.leituras;
+
+              if (!Array.isArray(leituras) || leituras.length === 0) {
+                fail("Resposta inválida: array de leituras vazio.");
+                return;
+              }
+
+              const lastReading = leituras[leituras.length - 1];
+              const temperature = Number(lastReading.objeto_C.toFixed(1));
+              finish({ temperature, ...classifyTemperature(temperature) });
+            } catch (_) {
+              fail("Falha ao interpretar resposta do sensor.");
+            }
+          }
+          break;
+        }
+
+        case "onError": {
+          fail(`Erro USB (${errorCode}): ${errorMessage ?? "desconhecido"}`);
+          break;
+        }
+      }
+    });
+
+    try {
+      const devices = await serialport.listDevices();
+      if (!devices || devices.length === 0) {
+        fail("Nenhum dispositivo USB encontrado.");
+        return;
+      }
+
+      const deviceId: number = (devices[0] as any)?.deviceId ?? (devices[0] as any)?.id ?? -1;
+      connectedDeviceId = deviceId;
+
+      serialport.setParams(
+        { driver: DriverType.AUTO, baudRate: BAUD_RATE, returnedDataType: ReturnedDataType.UTF8 },
+        deviceId,
+      );
+
+      serialport.connect(deviceId);
+
+    } catch (err: any) {
+      fail(err?.message ?? "Falha ao comunicar com o dispositivo USB.");
+    }
+  });
 }
 
 export default {
-  startMockMeasurement,
+  startUsbMeasurement,
 };
