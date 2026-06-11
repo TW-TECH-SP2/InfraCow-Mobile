@@ -21,10 +21,22 @@ const getImageUrl = (imagePath?: string | null): ImageSourcePropType => {
   return { uri: `${API_URL}/${fullPath}` };
 };
 
-const detectGender = (genero: any) => {
-  const s = String(genero ?? "").trim().toLowerCase();
-  if (s === "f" || s === "feminino") return "female";
-  if (s === "m" || s === "macho" || s === "masculino") return "male";
+// FUNÇÃO CORRIGIDA para "Fêmea" e "Macho" da API
+const detectGender = (genero: any): string => {
+  if (!genero) return "unknown";
+  
+  const s = String(genero).trim();
+  
+  // Feminino - valores que a API pode retornar
+  if (s === "Fêmea" || s === "FEMEA" || s === "fêmea" || s === "feminino" || s === "Feminino") {
+    return "female";
+  }
+  
+  // Masculino - valores que a API pode retornar
+  if (s === "Macho" || s === "MACHO" || s === "macho" || s === "masculino" || s === "Masculino") {
+    return "male";
+  }
+  
   return "unknown";
 };
 
@@ -59,7 +71,6 @@ export default function FarmScreen() {
     if (!farmId) return;
 
     try {
-      // Busca animais e medições em paralelo
       const [animalsRes, measurementsRes] = await Promise.all([
         api.get("/animais"),
         api.get("/medicoes")
@@ -72,7 +83,6 @@ export default function FarmScreen() {
       const females = farmAnimals.filter((a: any) => detectGender(a.genero) === "female").length;
       const males = farmAnimals.filter((a: any) => detectGender(a.genero) === "male").length;
       
-      // Calcula temperatura média
       const allMeasurements = measurementsRes.data?.medicoes || measurementsRes.data || [];
       const animalIds = new Set(farmAnimals.map((a: any) => String(a.id_animal)));
       const farmMeasurements = allMeasurements.filter((m: any) => animalIds.has(String(m.id_animal)));

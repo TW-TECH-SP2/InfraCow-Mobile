@@ -43,13 +43,6 @@ const resolveAnimalImage = (image?: string | null): ImageSourcePropType => {
   return { uri: `${baseUrl}/${path}` };
 };
 
-const mockAnimalData = { varTemperature: 0.5 };
-
-const data = {
-  labels: ["1", "5", "10", "15", "20", "25", "30"],
-  datasets: [{ data: [36, 37, 38, 39, 37.5, 36.8, 38.2] }],
-};
-
 export default function AnimalScreen() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [loadingDelete, setLoadingDelete] = useState(false);
@@ -65,33 +58,113 @@ export default function AnimalScreen() {
   const [ultimaMedicao, setUltimaMedicao] = useState<number | null>(null);
   const [dataUltimaMedicao, setDataUltimaMedicao] = useState<string>('--');
 
+  // Estado para o gráfico
+  const [chartData, setChartData] = useState({
+    labels: [] as string[],
+    datasets: [{ data: [] as number[] }]
+  });
+  const [variacaoTemp, setVariacaoTemp] = useState(0);
+  const [loadingChart, setLoadingChart] = useState(false);
+
+  // Estado para filtro de data
+  const [startDate, setStartDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 30); // último mês
+    return date;
+  });
+  const [endDate, setEndDate] = useState(new Date());
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
   useEffect(() => {
     setHeaderImageSource(resolveAnimalImage(animalImage));
   }, [animalImage]);
 
   useEffect(() => {
-    const fetchUltimaMedicao = async () => {
-      const animalId = animal?.id_animal ?? animal?.id ?? null;
-      if (!animalId) return;
-      try {
-        const respMedicoes = await api.get('/medicoes');
-        const todasMedicoes: any[] = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
-        const medicoesDoAnimal = todasMedicoes
-          .filter((m: any) => String(m.id_animal) === String(animalId))
-          .sort((a: any, b: any) => new Date(b.datahora).getTime() - new Date(a.datahora).getTime());
-        if (medicoesDoAnimal.length > 0) {
-          setUltimaMedicao(Number(medicoesDoAnimal[0].temp));
-          const d = new Date(medicoesDoAnimal[0].datahora);
-          setDataUltimaMedicao(
-            `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-          );
-        }
-      } catch (err) {
-        console.error('Erro ao buscar última medição:', err);
-      }
-    };
     fetchUltimaMedicao();
   }, [animal]);
+
+  useEffect(() => {
+    fetchMedicoesPorPeriodo();
+  }, [startDate, endDate, animal]);
+
+  const fetchUltimaMedicao = async () => {
+    const animalId = animal?.id_animal ?? animal?.id ?? null;
+    if (!animalId) return;
+    try {
+      const respMedicoes = await api.get('/medicoes');
+      const todasMedicoes: any[] = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
+      const medicoesDoAnimal = todasMedicoes
+        .filter((m: any) => String(m.id_animal) === String(animalId))
+        .sort((a: any, b: any) => new Date(b.datahora).getTime() - new Date(a.datahora).getTime());
+      if (medicoesDoAnimal.length > 0) {
+        setUltimaMedicao(Number(medicoesDoAnimal[0].temp));
+        const d = new Date(medicoesDoAnimal[0].datahora);
+        setDataUltimaMedicao(
+          `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+        );
+      }
+    } catch (err) {
+      console.error('Erro ao buscar última medição:', err);
+    }
+  };
+
+  const fetchMedicoesPorPeriodo = async () => {
+    const animalId = animal?.id_animal ?? animal?.id ?? null;
+    if (!animalId) return;
+
+    setLoadingChart(true);
+    try {
+      const respMedicoes = await api.get('/medicoes');
+      const todasMedicoes: any[] = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
+      
+      // Filtra por animal e por período
+      const medicoesFiltradas = todasMedicoes.filter((m: any) => {
+        const idMatch = String(m.id_animal) === String(animalId);
+        const dataMedicao = new Date(m.datahora);
+        const dataInicio = new Date(startDate);
+        const dataFim = new Date(endDate);
+        dataFim.setHours(23, 59, 59);
+        const dataMatch = dataMedicao >= dataInicio && dataMedicao <= dataFim;
+        return idMatch && dataMatch;
+      });
+
+      // Ordena por data
+      medicoesFiltradas.sort((a: any, b: any) => new Date(a.datahora).getTime() - new Date(b.datahora).getTime());
+
+      if (medicoesFiltradas.length === 0) {
+        setChartData({ labels: [], datasets: [{ data: [] }] });
+        setVariacaoTemp(0);
+        setLoadingChart(false);
+        return;
+      }
+
+      // Prepara dados para o gráfico
+      const labels = medicoesFiltradas.map((m: any) => {
+        const d = new Date(m.datahora);
+        return `${d.getDate()}/${d.getMonth() + 1}`;
+      });
+
+      const temperatures = medicoesFiltradas.map((m: any) => Number(m.temp));
+
+      // Calcula variância (diferença entre maior e menor)
+      const maxTemp = Math.max(...temperatures);
+      const minTemp = Math.min(...temperatures);
+      const variacao = maxTemp - minTemp;
+
+      setChartData({
+        labels: labels,
+        datasets: [{ data: temperatures }]
+      });
+      setVariacaoTemp(variacao);
+
+    } catch (err) {
+      console.error('Erro ao buscar medições:', err);
+      Alert.alert('Erro', 'Não foi possível carregar as medições');
+    } finally {
+      setLoadingChart(false);
+    }
+  };
 
   const getTemperatureData = (temp?: number | null) => {
     if (temp === null || temp === undefined) {
@@ -122,13 +195,10 @@ export default function AnimalScreen() {
   };
 
   const { width } = useWindowDimensions();
-
-  const [startDate, setStartDate] = useState(new Date());
-  const [endDate, setEndDate] = useState(new Date());
-  const [showStartPicker, setShowStartPicker] = useState(false);
-  const [showEndPicker, setShowEndPicker] = useState(false);
-
   const tempData = getTemperatureData(ultimaMedicao ?? averageTemperature);
+
+  // Define a largura do gráfico baseada na quantidade de dados
+  const chartWidth = Math.max(width - 32, chartData.labels.length * 60);
 
   return (
     <View style={{ flex: 1 }}>
@@ -180,53 +250,75 @@ export default function AnimalScreen() {
             <Text style={styles.chartTitle}>Histórico de medições</Text>
             <View style={styles.varContainer}>
               <Text allowFontScaling={false} style={styles.varLabel}>Var. de temp.</Text>
-              <Text style={styles.varValue}>{mockAnimalData.varTemperature.toFixed(2)}°C</Text>
+              <Text style={styles.varValue}>{variacaoTemp.toFixed(2)}°C</Text>
             </View>
           </View>
 
           <View style={styles.dateRow}>
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowStartPicker(true)}>
-              <Text allowFontScaling={false}>De</Text>
+              <Text allowFontScaling={false}>
+                De: {startDate.toLocaleDateString('pt-BR')}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowEndPicker(true)}>
-              <Text allowFontScaling={false}>À</Text>
+              <Text allowFontScaling={false}>
+                À: {endDate.toLocaleDateString('pt-BR')}
+              </Text>
             </TouchableOpacity>
           </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <BarChart
-              data={data}
-              width={data.labels.length * 60}
-              height={180}
-              fromZero
-              yAxisLabel=""
-              yAxisSuffix="°C"
-              withHorizontalLabels={true}
-              withInnerLines={true}
-              chartConfig={{
-                barPercentage: 0.5,
-                backgroundGradientFrom: "#F2F2F2",
-                backgroundGradientTo: "#F2F2F2",
-                decimalPlaces: 1,
-                color: () => "#4D5C52",
-                labelColor: () => "#000",
-                propsForBackgroundLines: { stroke: "#eee" },
-              }}
-            />
-          </ScrollView>
 
           <DateTimePickerModal
             isVisible={showStartPicker}
             mode="date"
-            onConfirm={(date) => { setStartDate(date); setShowStartPicker(false); }}
+            date={startDate}
+            onConfirm={(date) => { 
+              setStartDate(date); 
+              setShowStartPicker(false);
+            }}
             onCancel={() => setShowStartPicker(false)}
           />
           <DateTimePickerModal
             isVisible={showEndPicker}
             mode="date"
-            onConfirm={(date) => { setEndDate(date); setShowEndPicker(false); }}
+            date={endDate}
+            onConfirm={(date) => { 
+              setEndDate(date); 
+              setShowEndPicker(false);
+            }}
             onCancel={() => setShowEndPicker(false)}
           />
+
+          {loadingChart ? (
+            <Text style={{ textAlign: 'center', marginTop: 20 }}>Carregando...</Text>
+          ) : chartData.labels.length === 0 ? (
+            <Text style={{ textAlign: 'center', marginTop: 20 }}>Nenhuma medição encontrada neste período</Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <BarChart
+                data={chartData}
+                width={chartWidth}
+                height={220}
+                fromZero={false}
+                yAxisLabel=""
+                yAxisSuffix="°C"
+                withHorizontalLabels={true}
+                withInnerLines={true}
+                chartConfig={{
+                  barPercentage: 0.7,
+                  backgroundGradientFrom: "#F2F2F2",
+                  backgroundGradientTo: "#F2F2F2",
+                  decimalPlaces: 1,
+                  color: (opacity = 1) => `#4D5C52`,
+                  labelColor: (opacity = 1) => `#000`,
+                  propsForBackgroundLines: { stroke: "#eee" },
+                }}
+                style={{
+                  marginVertical: 8,
+                  borderRadius: 8,
+                }}
+              />
+            </ScrollView>
+          )}
         </View>
 
         <TouchableOpacity style={styles.deleteButton} onPress={() => setShowDeleteModal(true)} disabled={loadingDelete}>
@@ -234,7 +326,7 @@ export default function AnimalScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      <Navbar active="home" />
+      <Navbar />
 
       <Modal visible={showDeleteModal} transparent animationType="fade" onRequestClose={() => setShowDeleteModal(false)}>
         <View style={styles.modalOverlay}>
