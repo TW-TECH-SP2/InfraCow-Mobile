@@ -17,10 +17,9 @@ Antes de começar, você precisa ter instalado:
 
 ```bash
 # Clonar o repositório
-git clone https://github.com/seu-usuario/seu-repo.git
-
+git clone https://github.com/TW-TECH-SP2/InfraCow-Mobile.git
 # Entrar na pasta
-cd seu-repo
+cd InfraCow-Mobile
 
 # Instalar todas as dependências (npm install é suficiente)
 npm install
