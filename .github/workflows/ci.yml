@@ -1,0 +1,118 @@
+name: Mobile CI & EAS Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Perfil de build EAS (development | preview | production)"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - development
+          - preview
+          - production
+
+jobs:
+  quality:
+    name: Lint, typecheck e validação de config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Checagem de tipos (TypeScript)
+        run: npx tsc --noEmit
+
+      - name: Validar app.json/eas.json (config Expo resolve sem erro)
+        run: npx expo config --json > /dev/null
+
+      - name: Checar consistência de runtimeVersion
+        run: |
+          RUNTIME_VERSION=$(npx expo config --json | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{const j=JSON.parse(d);console.log(j.runtimeVersion||j.expo?.runtimeVersion||'')})")
+          echo "runtimeVersion atual: $RUNTIME_VERSION"
+          if [ -z "$RUNTIME_VERSION" ]; then
+            echo "::warning::runtimeVersion não definido em app.json — updates OTA podem não ser aplicados corretamente."
+          fi
+
+  build-android:
+    name: EAS Build (Android)
+    needs: quality
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Instalar EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Build via EAS
+        run: |
+          PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          echo "Rodando build com perfil: $PROFILE"
+          eas build --platform android --profile "$PROFILE" --non-interactive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+  publish-ota:
+    name: Publicar atualização OTA (canal production)
+    needs: quality
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Instalar EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Verificar se a API de produção está saudável antes de liberar o update
+        run: |
+          API_URL="${{ secrets.PRODUCTION_API_URL || 'https://infracow-api-hv24.onrender.com' }}"
+          echo "Checando $API_URL/health"
+          for i in $(seq 1 10); do
+            if curl -fs "$API_URL/health" | grep -q '"status":"ok"'; then
+              echo "API de produção respondendo normalmente."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::API de produção não respondeu em /health. Update OTA cancelado."
+          exit 1
+
+      - name: Publicar update OTA
+        run: eas update --branch production --message "CI ${{ github.sha }}"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
