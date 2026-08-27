@@ -131,13 +131,11 @@ export default function EditAnimal() {
             const resp = await fetch(uri);
             const blob = await resp.blob();
             const file = new File([blob], filename, { type: blob.type || type });
-            // @ts-ignore
             form.append('imagem', file);
           } catch (e) {
             console.warn('Could not convert image uri to blob on web', e);
           }
         } else {
-          // @ts-ignore
           form.append('imagem', { uri, name: filename, type });
         }
       }
@@ -162,7 +160,6 @@ export default function EditAnimal() {
     >
       <View style={styles.container}>
         
-        {/* HEADER */}
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.close}>
           <Text style={styles.closeText}>✕</Text>
         </TouchableOpacity>
@@ -300,7 +297,6 @@ export default function EditAnimal() {
 
           </View>
 
-          {/* FOTO */}
           <View style={styles.photoBox}>
 
             <TouchableOpacity style={styles.photoLeft} onPress={abrirGaleria}>
@@ -324,7 +320,6 @@ export default function EditAnimal() {
 
           </View>
 
-          {/* BOTÃO */}
           <TouchableOpacity style={styles.button} onPress={handleSave} disabled={loading}>
             <Text style={styles.buttonText}>{loading ? "Salvando..." : "Salvar alterações"}</Text>
           </TouchableOpacity>

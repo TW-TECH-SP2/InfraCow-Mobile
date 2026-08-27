@@ -24,7 +24,6 @@ const API_URL = "https://infracow-api-hv24.onrender.com";
 const getImageUrl = (imagePath?: string | null) => {
   if (!imagePath) return FALLBACK_IMAGE;
   if (imagePath.startsWith("http")) return { uri: imagePath };
-  // Remove barras no início e garante o caminho com uploads/
   const cleanPath = imagePath.replace(/^\/+/, "");
   const fullPath = cleanPath.startsWith("uploads/") ? cleanPath : `uploads/${cleanPath}`;
   return { uri: `${API_URL}/${fullPath}` };

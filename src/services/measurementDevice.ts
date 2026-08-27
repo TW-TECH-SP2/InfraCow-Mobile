@@ -24,7 +24,6 @@ type EspResponse = {
 const BAUD_RATE = 115200;
 const MEASUREMENT_TIMEOUT_MS = 16000;
 
-// Instância única — conexão USB mantida entre medições
 const serialport = new Serialport();
 let activeDeviceId = -1;
 
@@ -46,7 +45,6 @@ function classifyTemperature(temp: number): Pick<MeasurementResult, "status" | "
 }
 
 export async function startUsbMeasurement(): Promise<MeasurementResult> {
-  // Remove listener anterior — nunca acumula callbacks
   try { serialport.stopListening(); } catch (_) {}
 
   return new Promise(async (resolve, reject) => {
@@ -58,7 +56,6 @@ export async function startUsbMeasurement(): Promise<MeasurementResult> {
       if (settled) return;
       settled = true;
       if (timeoutHandle) { clearTimeout(timeoutHandle); timeoutHandle = null; }
-      // Só remove o listener — mantém a conexão USB aberta para a próxima medição
       try { serialport.stopListening(); } catch (_) {}
       resolve(result);
     };
@@ -68,7 +65,6 @@ export async function startUsbMeasurement(): Promise<MeasurementResult> {
       settled = true;
       if (timeoutHandle) { clearTimeout(timeoutHandle); timeoutHandle = null; }
       try { serialport.stopListening(); } catch (_) {}
-      // Em caso de erro, desconecta de verdade para forçar reconexão limpa
       try { serialport.disconnect(activeDeviceId); } catch (_) {}
       activeDeviceId = -1;
       reject(new Error(msg));
@@ -83,7 +79,6 @@ export async function startUsbMeasurement(): Promise<MeasurementResult> {
 
       switch (type) {
         case "onConnected": {
-          // Primeira conexão ou reconexão após erro
           activeDeviceId = deviceId ?? activeDeviceId;
           serialport.writeString("MEDIR\n", activeDeviceId, portInterface ?? 0);
           break;
@@ -139,11 +134,9 @@ export async function startUsbMeasurement(): Promise<MeasurementResult> {
         : false;
 
       if (alreadyConnected) {
-        // Porta já aberta — manda direto o comando
         activeDeviceId = deviceId;
         serialport.writeString("MEDIR\n", activeDeviceId, 0);
       } else {
-        // Primeira vez ou após erro — conecta normalmente (pode mostrar diálogo USB)
         activeDeviceId = deviceId;
         serialport.connect(deviceId);
       }

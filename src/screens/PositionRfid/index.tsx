@@ -5,15 +5,6 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import api from "../../services/api";
 import styles from "./styles";
 
-/**
- * PositionRfidScreen — leitura NFC/RFID com react-native-nfc-manager v3.x
- *
- * Parâmetros (route.params):
- *   mode: 'identify' | 'register'
- *     - 'identify': busca o animal no banco e navega para IdentifiedAnimal
- *     - 'register': devolve o código lido para RegisterAnimal via navigate
- *   farm: objeto da fazenda (usado no mode 'identify')
- */
 export default function PositionRfidScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -24,7 +15,6 @@ export default function PositionRfidScreen() {
   const mode: 'identify' | 'register' = route.params?.mode ?? 'identify';
   const farmId = route.params?.farm?.id_fazenda ?? route.params?.farm?.id ?? null;
 
-  // Web: NFC não disponível
   if (Platform.OS === 'web') {
     return (
       <View style={styles.container}>
@@ -61,13 +51,10 @@ export default function PositionRfidScreen() {
     }
 
     try {
-      // Inicia o NFC se ainda não foi iniciado
       await NfcManager.start();
     } catch (e) {
-      // start() pode lançar se já foi chamado antes — ignorar
     }
 
-    // Verifica se NFC está disponível no dispositivo
     let nfcSupported = false;
     try {
       nfcSupported = await NfcManager.isSupported();
@@ -97,33 +84,26 @@ export default function PositionRfidScreen() {
     setMensagem('Aproxime o dispositivo do brinco...');
 
     try {
-      // Solicita tecnologia NDEF (padrão para tags NFC comuns)
       await NfcManager.requestTechnology(NfcTech.Ndef);
 
-      // Lê a tag
       const tag = await NfcManager.getTag();
 
       if (!isActiveRef.current) return;
 
       console.log('[PositionRfid] Tag lida:', JSON.stringify(tag));
 
-      // Extrai o código da tag
       let rfidCode = '';
 
-      // Tenta extrair texto do payload NDEF
       if (tag?.ndefMessage && Array.isArray(tag.ndefMessage) && tag.ndefMessage.length > 0) {
         const record = tag.ndefMessage[0];
         if (record?.payload) {
-          // payload é array de bytes — converte para string
           const payload: number[] = Array.from(record.payload);
-          // Remove o byte de status (primeiro byte em text records)
           const langCodeLength = payload[0] & 0x3f;
           const textBytes = payload.slice(1 + langCodeLength);
           rfidCode = textBytes.map((b: number) => String.fromCharCode(b)).join('').trim();
         }
       }
 
-      // Fallback: usa o ID da tag (série de bytes em hex)
       if (!rfidCode && tag?.id) {
         rfidCode = Array.from(tag.id as number[])
           .map((b: number) => b.toString(16).padStart(2, '0'))
@@ -139,7 +119,6 @@ export default function PositionRfidScreen() {
 
       console.log('[PositionRfid] Código extraído:', rfidCode);
 
-      // ── mode: 'register' ─────────────────────────────────────────────────
       if (mode === 'register') {
         navigation.navigate('RegisterAnimal', {
           farm: route.params?.farm,
@@ -148,7 +127,6 @@ export default function PositionRfidScreen() {
         return;
       }
 
-      // ── mode: 'identify' ─────────────────────────────────────────────────
       setMensagem('Identificando animal...');
 
       const resp = await api.get('/animais');
@@ -199,7 +177,6 @@ export default function PositionRfidScreen() {
         navigation.goBack();
       }
     } finally {
-      // Sempre libera a tecnologia ao terminar
       try {
         const NfcManager2 = require('react-native-nfc-manager').default;
         await NfcManager2.cancelTechnologyRequest().catch(() => {});
@@ -207,7 +184,6 @@ export default function PositionRfidScreen() {
     }
   };
 
-  // Inicia leitura ao entrar na tela
   useEffect(() => {
     isActiveRef.current = true;
     lerTag();

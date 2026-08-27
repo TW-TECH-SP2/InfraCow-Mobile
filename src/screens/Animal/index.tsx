@@ -58,7 +58,6 @@ export default function AnimalScreen() {
   const [ultimaMedicao, setUltimaMedicao] = useState<number | null>(null);
   const [dataUltimaMedicao, setDataUltimaMedicao] = useState<string>('--');
 
-  // Estado para o gráfico
   const [chartData, setChartData] = useState({
     labels: [] as string[],
     datasets: [{ data: [] as number[] }]
@@ -66,10 +65,9 @@ export default function AnimalScreen() {
   const [variacaoTemp, setVariacaoTemp] = useState(0);
   const [loadingChart, setLoadingChart] = useState(false);
 
-  // Estado para filtro de data
   const [startDate, setStartDate] = useState(() => {
     const date = new Date();
-    date.setDate(date.getDate() - 30); // último mês
+    date.setDate(date.getDate() - 30);
     return date;
   });
   const [endDate, setEndDate] = useState(new Date());
@@ -118,7 +116,6 @@ export default function AnimalScreen() {
       const respMedicoes = await api.get('/medicoes');
       const todasMedicoes: any[] = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
       
-      // Filtra por animal e por período
       const medicoesFiltradas = todasMedicoes.filter((m: any) => {
         const idMatch = String(m.id_animal) === String(animalId);
         const dataMedicao = new Date(m.datahora);
@@ -129,7 +126,6 @@ export default function AnimalScreen() {
         return idMatch && dataMatch;
       });
 
-      // Ordena por data
       medicoesFiltradas.sort((a: any, b: any) => new Date(a.datahora).getTime() - new Date(b.datahora).getTime());
 
       if (medicoesFiltradas.length === 0) {
@@ -139,7 +135,6 @@ export default function AnimalScreen() {
         return;
       }
 
-      // Prepara dados para o gráfico
       const labels = medicoesFiltradas.map((m: any) => {
         const d = new Date(m.datahora);
         return `${d.getDate()}/${d.getMonth() + 1}`;
@@ -147,7 +142,6 @@ export default function AnimalScreen() {
 
       const temperatures = medicoesFiltradas.map((m: any) => Number(m.temp));
 
-      // Calcula variância (diferença entre maior e menor)
       const maxTemp = Math.max(...temperatures);
       const minTemp = Math.min(...temperatures);
       const variacao = maxTemp - minTemp;
@@ -197,7 +191,6 @@ export default function AnimalScreen() {
   const { width } = useWindowDimensions();
   const tempData = getTemperatureData(ultimaMedicao ?? averageTemperature);
 
-  // Define a largura do gráfico baseada na quantidade de dados
   const chartWidth = Math.max(width - 32, chartData.labels.length * 60);
 
   return (

@@ -53,7 +53,6 @@ export default function RegisterScreen({ navigation }: any) {
       
       let message = err?.response?.data?.message || err?.response?.data?.error || err.message || 'Erro ao cadastrar';
       
-      // Trata erros comuns
       if (message.includes('email')) {
         message = 'Este email já está cadastrado';
       } else if (message.includes('Sequelize') || message.includes('validation')) {
@@ -73,7 +72,6 @@ export default function RegisterScreen({ navigation }: any) {
         style={styles.backgroundformuser}
       />
 
-      {/* TOPO */}
       <View style={styles.topContent}>
         <TouchableOpacity onPress={() => navigation.navigate("Auth")}>
           <Image
@@ -88,7 +86,6 @@ export default function RegisterScreen({ navigation }: any) {
         />
       </View>
 
-      {/* FORM */}
       <View style={styles.form}>
         <Text style={styles.title}>Crie a sua conta</Text>
 

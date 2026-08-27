@@ -48,7 +48,6 @@ export default function EditScreen({ navigation }: any) {
         setName(user.nome ?? "");
         setEmail(user.email ?? "");
         const raw = user.localImageUri ?? user.imagem ?? user.foto ?? user.imageUrl ?? null;
-        // localImageUri é URI local (file://), mostra direto; caso contrário resolve via API
         const resolved = user.localImageUri ? user.localImageUri : resolveUserPhoto(raw);
         setFoto(resolved);
       }
@@ -69,7 +68,6 @@ export default function EditScreen({ navigation }: any) {
     });
     if (!result.canceled) {
       const asset = result.assets[0];
-      // Salva localmente para persistência entre sessões
       const localImage = await saveImageLocally(asset.uri, asset.mimeType ?? 'image/jpeg');
       setFoto(localImage.localUri);
       setImageAsset({
@@ -108,17 +106,14 @@ export default function EditScreen({ navigation }: any) {
           const resp = await fetch(uri);
           const blob = await resp.blob();
           const file = new File([blob], filename, { type: blob.type || mimeType });
-          // @ts-ignore
           form.append('imagem', file);
         } else {
-          // @ts-ignore
           form.append('imagem', { uri, name: filename, type: mimeType });
         }
       }
 
       const res = await api.put('/perfil', form);
 
-      // Atualiza o usuário salvo localmente com dados da API + URI local da imagem
       const usuarioAtualizado = res.data?.usuario;
       if (usuarioAtualizado) {
         const currentUser = await auth.getUser();
@@ -127,7 +122,6 @@ export default function EditScreen({ navigation }: any) {
           nome: usuarioAtualizado.nome ?? name,
           email: usuarioAtualizado.email ?? email,
           imagem: usuarioAtualizado.imagem ?? currentUser?.imagem ?? null,
-          // mantém URI local para exibição offline
           localImageUri: imageAsset?.localUri ?? currentUser?.localImageUri ?? null,
         });
       }

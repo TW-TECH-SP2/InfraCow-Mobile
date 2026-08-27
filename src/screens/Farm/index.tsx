@@ -21,22 +21,124 @@ const getImageUrl = (imagePath?: string | null): ImageSourcePropType => {
   return { uri: `${API_URL}/${fullPath}` };
 };
 
-// FUNÇÃO CORRIGIDA para "Fêmea" e "Macho" da API
+const normalizeText = (value?: string | null) => String(value ?? "").trim().toLowerCase();
+
+const extractCollection = (payload: any, keys: string[] = []): any[] => {
+  if (Array.isArray(payload)) return payload;
+
+  if (payload && typeof payload === "object") {
+    for (const key of keys) {
+      const value = payload[key];
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") {
+        if (Array.isArray(value.data)) return value.data;
+        if (Array.isArray(value.items)) return value.items;
+        if (Array.isArray(value.result)) return value.result;
+        if (Array.isArray(value.animais)) return value.animais;
+        if (Array.isArray(value.animals)) return value.animals;
+        if (Array.isArray(value.medicoes)) return value.medicoes;
+        if (Array.isArray(value.measurements)) return value.measurements;
+      }
+    }
+
+    for (const key of ["data", "items", "result", "animais", "animals", "medicoes", "measurements"]) {
+      const value = payload[key];
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") {
+        if (Array.isArray(value.data)) return value.data;
+        if (Array.isArray(value.items)) return value.items;
+        if (Array.isArray(value.result)) return value.result;
+      }
+    }
+  }
+
+  return [];
+};
+
+const extractAnimals = (payload: any): any[] => extractCollection(payload, ["animais", "animals"]);
+const extractMeasurements = (payload: any): any[] => extractCollection(payload, ["medicoes", "measurements"]);
+
+const getNestedValue = (source: any, keys: string[]): any => {
+  let current = source;
+  for (const key of keys) {
+    if (current == null) return undefined;
+    current = current[key];
+  }
+  return current;
+};
+
+const getAnimalFarmId = (animal: any): string => {
+  const candidates = [
+    animal?.id_fazenda,
+    animal?.fazenda_id,
+    animal?.farm_id,
+    animal?.idFarm,
+    animal?.farm?.id_fazenda,
+    animal?.farm?.id,
+    animal?.fazenda?.id_fazenda,
+    animal?.fazenda?.id,
+    getNestedValue(animal, ["fazenda", "id_fazenda"]),
+    getNestedValue(animal, ["farm", "id_fazenda"]),
+    getNestedValue(animal, ["fazenda", "id"]),
+    getNestedValue(animal, ["farm", "id"]),
+  ];
+
+  for (const value of candidates) {
+    if (value != null && value !== "") {
+      return String(value).trim();
+    }
+  }
+
+  return "";
+};
+
+const getAnimalId = (animal: any): string => {
+  const candidates = [
+    animal?.id_animal,
+    animal?.id,
+    animal?.animal_id,
+    animal?.idAnimal,
+    animal?.animalId,
+  ];
+
+  for (const value of candidates) {
+    if (value != null && value !== "") {
+      return String(value).trim();
+    }
+  }
+
+  return "";
+};
+
 const detectGender = (genero: any): string => {
-  if (!genero) return "unknown";
-  
-  const s = String(genero).trim();
-  
-  // Feminino - valores que a API pode retornar
-  if (s === "Fêmea" || s === "FEMEA" || s === "fêmea" || s === "feminino" || s === "Feminino") {
+  const raw = genero ?? getNestedValue(genero, ["valor"]) ?? getNestedValue(genero, ["nome"]) ?? getNestedValue(genero, ["tipo"]);
+  const s = normalizeText(raw);
+
+  if (!s) return "unknown";
+
+  if (
+    s.includes("fême") ||
+    s.includes("feme") ||
+    s.includes("femin") ||
+    s.includes("female") ||
+    s === "f" ||
+    s === "fêmea" ||
+    s === "feminino"
+  ) {
     return "female";
   }
-  
-  // Masculino - valores que a API pode retornar
-  if (s === "Macho" || s === "MACHO" || s === "macho" || s === "masculino" || s === "Masculino") {
+
+  if (
+    s.includes("mach") ||
+    s.includes("male") ||
+    s.includes("masc") ||
+    s.includes("macho") ||
+    s === "m" ||
+    s === "masculino"
+  ) {
     return "male";
   }
-  
+
   return "unknown";
 };
 
@@ -52,6 +154,7 @@ export default function FarmScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const paramFarm = route.params?.farm ?? null;
+  const farmId = paramFarm?.id_fazenda ?? paramFarm?.id ?? null;
   
   const [farmData, setFarmData] = useState({
     nome_fazenda: paramFarm?.nome_fazenda ?? "Fazenda",
@@ -67,26 +170,40 @@ export default function FarmScreen() {
   const [loadingDelete, setLoadingDelete] = useState(false);
 
   const loadFarm = useCallback(async () => {
-    const farmId = paramFarm?.id_fazenda;
     if (!farmId) return;
 
-    try {
-      const [animalsRes, measurementsRes] = await Promise.all([
-        api.get("/animais"),
-        api.get("/medicoes")
-      ]);
+    let farmAnimals: any[] = [];
 
-      const allAnimals = animalsRes.data?.animais || animalsRes.data || [];
-      const farmAnimals = allAnimals.filter((a: any) => String(a.id_fazenda) === String(farmId));
-      
+    try {
+      const animalsRes = await api.get("/animais");
+      const allAnimals = extractAnimals(animalsRes.data);
+      farmAnimals = allAnimals.filter((a: any) => getAnimalFarmId(a) === String(farmId));
+
       const total = farmAnimals.length;
-      const females = farmAnimals.filter((a: any) => detectGender(a.genero) === "female").length;
-      const males = farmAnimals.filter((a: any) => detectGender(a.genero) === "male").length;
-      
-      const allMeasurements = measurementsRes.data?.medicoes || measurementsRes.data || [];
-      const animalIds = new Set(farmAnimals.map((a: any) => String(a.id_animal)));
-      const farmMeasurements = allMeasurements.filter((m: any) => animalIds.has(String(m.id_animal)));
-      
+      const females = farmAnimals.filter((a: any) => detectGender(a.genero ?? a.genero_animal ?? a.generoAnimal ?? a.sexo) === "female").length;
+      const males = farmAnimals.filter((a: any) => detectGender(a.genero ?? a.genero_animal ?? a.generoAnimal ?? a.sexo) === "male").length;
+
+      setFarmData((prev) => ({
+        ...prev,
+        nome_fazenda: paramFarm?.nome_fazenda ?? "Fazenda",
+        imagem: paramFarm?.imagem ?? null,
+        total,
+        females,
+        males,
+      }));
+
+      setHeaderSource(getImageUrl(paramFarm?.imagem));
+    } catch (err) {
+      console.error("[Farm] Erro ao carregar animais:", err);
+      return;
+    }
+
+    try {
+      const measurementsRes = await api.get("/medicoes");
+      const allMeasurements = extractMeasurements(measurementsRes.data);
+      const animalIds = new Set(farmAnimals.map((a: any) => getAnimalId(a)));
+      const farmMeasurements = allMeasurements.filter((m: any) => animalIds.has(String(m.id_animal ?? m.idAnimal ?? m.animal_id ?? m.animalId ?? "")));
+
       let avgTemp = null;
       if (farmMeasurements.length > 0) {
         const temps = farmMeasurements
@@ -97,19 +214,9 @@ export default function FarmScreen() {
         }
       }
 
-      setFarmData({
-        nome_fazenda: paramFarm?.nome_fazenda ?? "Fazenda",
-        imagem: paramFarm?.imagem ?? null,
-        total,
-        females,
-        males,
-        averageTemperature: avgTemp,
-      });
-      
-      setHeaderSource(getImageUrl(paramFarm?.imagem));
-      
+      setFarmData((prev) => ({ ...prev, averageTemperature: avgTemp }));
     } catch (err) {
-      console.error("[Farm] Erro ao carregar dados:", err);
+      console.error("[Farm] Erro ao carregar medições:", err);
     }
   }, [paramFarm]);
 
@@ -120,7 +227,6 @@ export default function FarmScreen() {
   );
 
   const handleDeleteFarm = async () => {
-    const farmId = paramFarm?.id_fazenda;
     if (!farmId) return;
 
     try {

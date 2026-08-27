@@ -20,7 +20,6 @@ export default function Navbar({ active }: Props) {
         Platform.OS === "android" && styles.androidGlass
       ]}
     >
-      {/* HOME */}
       <Pressable onPress={() => navigation.navigate("Home")}>
         <Image
           source={
@@ -32,7 +31,6 @@ export default function Navbar({ active }: Props) {
         />
       </Pressable>
 
-      {/* TUTORIALS */}
       <Pressable onPress={() => navigation.navigate("Tutorials")}>
         <Image
           source={
@@ -44,7 +42,6 @@ export default function Navbar({ active }: Props) {
         />
       </Pressable>
 
-      {/* MEASURE */}
       <Pressable onPress={() => navigation.navigate("Measure")}>
         <Image
           source={
@@ -56,7 +53,6 @@ export default function Navbar({ active }: Props) {
         />
       </Pressable>
 
-      {/* PROFILE */}
       <Pressable onPress={() => navigation.navigate("Profile")}>
         <Image
           source={
@@ -68,7 +64,6 @@ export default function Navbar({ active }: Props) {
         />
       </Pressable>
 
-      {/* NOTIFICATIONS */}
       <Pressable onPress={() => navigation.navigate("Notifications")}>
         <Image
           source={

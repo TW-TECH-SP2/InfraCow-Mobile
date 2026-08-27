@@ -14,7 +14,6 @@ export async function saveImageLocally(sourceUri: string, mimeType = 'image/jpeg
   const storedFilename = `${Date.now()}_${origName}`;
 
   if (Platform.OS === 'web') {
-    // In web, preserve the original URI; browser storage is handled separately by the upload flow.
     return { localUri: sourceUri, filename: storedFilename, mimeType };
   }
 
@@ -23,7 +22,6 @@ export async function saveImageLocally(sourceUri: string, mimeType = 'image/jpeg
     const destination = `${IMAGE_DIR}${storedFilename}`;
     await FileSystem.copyAsync({ from: sourceUri, to: destination });
 
-    // verify file exists and return stable filename (the storedFilename)
     const info = await FileSystem.getInfoAsync(destination);
     if (!info.exists) {
       throw new Error('Failed to save image to persistent storage');

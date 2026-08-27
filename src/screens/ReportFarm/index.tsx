@@ -144,14 +144,12 @@ export default function ReportFarm() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.close}>✕</Text>
         </TouchableOpacity>
       </View>
 
-      {/* CONTEÚDO */}
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
         <Text style={styles.title}>
           Relatório da fazenda:{"\n"}
@@ -161,7 +159,6 @@ export default function ReportFarm() {
         {loading && <Text style={styles.info}>Carregando...</Text>}
         {error && <Text style={[styles.info, { color: 'red' }]}>{error}</Text>}
 
-        {/* 🔹 RESUMO */}
         <View style={styles.summary}>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryLabel}>Medidos</Text>
@@ -181,7 +178,6 @@ export default function ReportFarm() {
           </View>
         </View>
 
-        {/* 🔹 LISTA */}
         <View style={styles.table}>
           {animals.map((item, index) => (
             <View key={index} style={styles.row}>
@@ -195,7 +191,6 @@ export default function ReportFarm() {
         </View>
       </ScrollView>
 
-      {/* BOTÃO FIXO */}
       <TouchableOpacity style={styles.downloadBtn} onPress={handleDownload}>
         <Image
           source={require("../../../assets/download.png")}

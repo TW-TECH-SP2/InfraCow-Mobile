@@ -16,17 +16,13 @@ type MeasureParams = {
   animal?: any;
 };
 
-// Função para classificar a temperatura com os MESMOS parâmetros das notificações
 const getStatusByTemperature = (temp: number): "success" | "warning" => {
-  // Hipotermia (menor ou igual a 34) -> anormal
   if (temp <= 34) {
     return "warning";
   }
-  // Febre (maior ou igual a 38.7) -> anormal
   if (temp >= 38.7) {
     return "warning";
   }
-  // Entre 34 e 38.7 -> normal
   return "success";
 };
 
@@ -58,7 +54,6 @@ export default function MeasureScreen() {
   };
 
   const handleMeasure = async () => {
-    // Estado resultado → finaliza e salva
     if (status === "success" || status === "warning") {
       try {
         if (lastTemperature !== null && !recordSaved) {
@@ -66,13 +61,11 @@ export default function MeasureScreen() {
           setRecordSaved(true);
         }
       } catch (_) {
-        // Erro no save não bloqueia a navegação
       }
       navigation.navigate("Animal", { animal, farm });
       return;
     }
 
-    // Estado idle → inicia medição
     try {
       setStatus("loading");
       setTemperatureText("...");
@@ -83,13 +76,12 @@ export default function MeasureScreen() {
       const response: MeasurementResult = await startUsbMeasurement();
       const temperature = response.temperature;
       
-      // USA A CLASSIFICAÇÃO CORRETA baseada nos parâmetros das notificações
       const correctStatus = getStatusByTemperature(temperature);
 
       setLastTemperature(temperature);
       setTemperatureText(`${temperature.toFixed(1)}°`);
       setResultMessage(response.message);
-      setStatus(correctStatus); // USANDO A CLASSIFICAÇÃO CORRETA, não o response.status
+      setStatus(correctStatus);
     } catch (error: any) {
       setStatus("idle");
       setTemperatureText("--");

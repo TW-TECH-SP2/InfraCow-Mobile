@@ -32,7 +32,6 @@ export default function EditFarm() {
   const route = useRoute<any>();
 
   const farm = route.params?.farm ?? {};
-  // Garante que o ID é um número inteiro válido (rejeita IDs locais como "farm_XXXXX")
   const rawFarmId = farm.id_fazenda ?? farm.id ?? null;
   const farmId = rawFarmId !== null && /^\d+$/.test(String(rawFarmId)) ? String(rawFarmId) : null;
 
@@ -51,7 +50,6 @@ export default function EditFarm() {
   useEffect(() => {
     const loadFarmDetails = async () => {
       if (!farmId) {
-        // farmId inválido (ID local antigo) — usa só os dados dos params
         setName(farm.nome_fazenda ?? farm.nome ?? farm.name ?? "");
         setStreet(farm.rua ?? farm.street ?? farm.endereco ?? "");
         setNeighborhood(farm.bairro ?? farm.neighborhood ?? "");
@@ -72,7 +70,6 @@ export default function EditFarm() {
         setNumber(String(farmToUse.numero ?? farmToUse.number ?? ""));
         setFoto(farmToUse.localImageUri ?? farmToUse.imagem ?? farmToUse.image ?? null);
       } catch (err) {
-        // Fallback: usa dados que vieram pelo params
         setName(farm.nome_fazenda ?? farm.nome ?? farm.name ?? "");
         setStreet(farm.rua ?? farm.street ?? farm.endereco ?? "");
         setNeighborhood(farm.bairro ?? farm.neighborhood ?? "");

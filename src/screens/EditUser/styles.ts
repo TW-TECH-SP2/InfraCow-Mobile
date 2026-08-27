@@ -27,7 +27,6 @@ logopequena: {
     width: 69,
     height: 33,
 },
-// formulario
 form:{
     width: "100%",
     padding: 20,

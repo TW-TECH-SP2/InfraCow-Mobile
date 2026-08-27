@@ -34,13 +34,11 @@ export default function RegisterFarm() {
   };
 
   const handleRegister = async () => {
-    // Valida campos
     if (!name || !street || !neighborhood || !city || !cep || !number) {
       Alert.alert('Campos obrigatórios', 'Preencha todos os campos');
       return;
     }
 
-    // Valida e converte número
     const numeroInt = parseInt(number, 10);
     if (isNaN(numeroInt)) {
       Alert.alert('Erro', 'O número da fazenda deve ser um valor numérico válido');
@@ -123,7 +121,7 @@ export default function RegisterFarm() {
                 placeholderTextColor="#D3D3D3" 
                 value={number} 
                 onChangeText={setNumber}
-                keyboardType="numeric"  // <--- ADICIONA TECLADO NUMÉRICO
+                keyboardType="numeric"
               />
             </View>
           </View>

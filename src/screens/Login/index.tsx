@@ -76,7 +76,6 @@ export default function LoginScreen({ navigation }: any) {
           onChangeText={setPassword}
         />
 
-        {/* checkbox */}
         <TouchableOpacity
           style={styles.checkboxContainer}
           onPress={() => setRemember(!remember)}
@@ -85,7 +84,6 @@ export default function LoginScreen({ navigation }: any) {
           <Text style={styles.checkboxText}>Lembrar de mim</Text>
         </TouchableOpacity>
 
-        {/* botão */}
         <TouchableOpacity
           style={styles.button}
           onPress={handleLogin}

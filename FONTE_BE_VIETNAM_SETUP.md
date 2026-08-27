@@ -41,16 +41,13 @@ import { Text } from "react-native";
 ```tsx
 import Text from "../../components/Text";
 
-// Padrão (regular)
 <Text>Meu texto padrão</Text>
 
-// Com variação de peso
 <Text variant="bold">Texto em negrito</Text>
 <Text variant="semibold">Texto semi-negrito</Text>
 <Text variant="medium">Texto médio</Text>
 <Text variant="regular">Texto regular</Text>
 
-// Com estilos customizados
 <Text style={{ fontSize: 16, color: "#333" }}>Texto customizado</Text>
 ```
 

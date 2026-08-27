@@ -21,7 +21,6 @@ export default function RegisterAnimal() {
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
   const [codigo, setCodigo] = useState("");
-  // codigoVeioDaTag controla se o campo código fica visível
   const [codigoVeioDaTag, setCodigoVeioDaTag] = useState(false);
   const [raca, setRaca] = useState("");
   const [peso, setPeso] = useState("");
@@ -38,7 +37,6 @@ export default function RegisterAnimal() {
     : '';
   const farmName = routeFarm?.nome_fazenda ?? routeFarm?.name ?? '';
 
-  // Quando voltar da leitura NFC, preenche o código e mostra o campo
   useEffect(() => {
     if (route.params?.rfidCode) {
       setCodigo(route.params.rfidCode);
@@ -83,7 +81,6 @@ export default function RegisterAnimal() {
     });
   };
 
-  // Gera código silenciosamente — sem popup, sem mostrar no campo
   const marcarSemCodigo = () => {
     setCodigo(gerarCodigoAleatorio());
     setCodigoVeioDaTag(false);
@@ -156,7 +153,6 @@ export default function RegisterAnimal() {
           <Text style={styles.inputLabel}>Nome do Animal: *</Text>
           <TextInput style={styles.input} value={name} placeholder="Ex.: Mimosa" placeholderTextColor="#D3D3D3" onChangeText={setName} editable={!loading} />
 
-          {/* Código: só aparece se veio de leitura NFC */}
           {codigoVeioDaTag && (
             <>
               <Text style={styles.inputLabel}>Código do brinco:</Text>
@@ -170,7 +166,6 @@ export default function RegisterAnimal() {
             </>
           )}
 
-          {/* Botões de código */}
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
             <TouchableOpacity
               onPress={lerTagNfc}

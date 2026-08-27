@@ -35,7 +35,6 @@ export default function FaqScreen() {
   return (
     <View style={{ flex: 1 }}>
       <ScrollView style={styles.container}>
-        {/* HEADER */}
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Image
             source={require("../../../assets/back-dark.png")}
@@ -47,7 +46,6 @@ export default function FaqScreen() {
           FAQ - Perguntas {"\n"}Frequentes
         </Text>
 
-        {/* LISTA FAQ */}
         {faqData.map((item, index) => {
           const isOpen = openIndex === index;
 
@@ -77,7 +75,6 @@ export default function FaqScreen() {
         })}
       </ScrollView>
 
-      {/* NAVBAR */}
       <Navbar />
     </View>
   );

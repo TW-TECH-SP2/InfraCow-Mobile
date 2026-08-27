@@ -5,8 +5,6 @@ import auth from "../../services/auth";
 import api from "../../services/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Remove todas as chaves do sistema offline antigo (IDs locais como farm_XXXXX)
-// Roda apenas uma vez; na segunda abertura a flag já existe e pula
 const MIGRATION_KEY = '@infracow_migration_v2_done';
 
 const clearLegacyOfflineData = async () => {
@@ -17,7 +15,7 @@ const clearLegacyOfflineData = async () => {
     const allKeys = await AsyncStorage.getAllKeys();
     const legacyKeys = allKeys.filter((k) =>
       k.startsWith('@infracow_kv:') &&
-      k !== '@infracow_kv:session:active'   // mantém a sessão (token + user)
+      k !== '@infracow_kv:session:active'
     );
 
     if (legacyKeys.length > 0) {
@@ -42,7 +40,6 @@ export default function SplashScreen({ navigation }: any) {
       setShowLogo(true);
       const startedAt = Date.now();
 
-      // Limpa dados offline antigos (só na primeira vez)
       await clearLegacyOfflineData();
 
       const token = await auth.getToken();

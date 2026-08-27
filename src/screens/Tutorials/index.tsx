@@ -29,8 +29,6 @@ export default function TutorialScreen() {
 
   return (
     <View style={styles.container}>
-
-      {/* HEADER */}
       <View style={styles.header}>
         <Text style={styles.title}>
           Tutorial
@@ -41,7 +39,6 @@ export default function TutorialScreen() {
         <Text style={styles.subtitle}>Aprenda a manusear nosso sistema por aqui!</Text>
       </View>
 
-         {/* LISTA */}
                <FlatList
                  data={videos}
                  keyExtractor={(item) => item.id}
@@ -49,17 +46,14 @@ export default function TutorialScreen() {
                  renderItem={({ item }) => (
                     <View style={styles.videoCard}>
 
-                        {/* CONTAINER DA IMAGEM */}
                         <View style={styles.imageWrapper}>
 
                         <Image source={item.image} style={styles.videoimage} />
 
-                        {/* TEXTO NO CANTO SUPERIOR ESQUERDO */}
                         <Text style={styles.videoTitle}>
                             {item.name}
                         </Text>
 
-                        {/* PLAY CENTRALIZADO */}
                         <TouchableOpacity style={styles.playButton}>
                             <Image
                             source={require("../../../assets/playvideo.png")}
@@ -73,7 +67,6 @@ export default function TutorialScreen() {
                     )}
                />
 
-     {/* NAVBAR */}
           <Navbar active="tutorials" />
 
     </View>

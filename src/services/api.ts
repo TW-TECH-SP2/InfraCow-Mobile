@@ -12,10 +12,8 @@ const getApiUrl = (): string => {
 
 const api = axios.create({
   baseURL: getApiUrl(),
-  // sem timeout — servidor pode demorar para acordar, espera o tempo que precisar
 });
 
-// Injeta o token automaticamente em TODA requisição
 api.interceptors.request.use(async (config) => {
   try {
     const token = await AsyncStorage.getItem(TOKEN_KEY);
@@ -24,12 +22,10 @@ api.interceptors.request.use(async (config) => {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
   } catch (e) {
-    // sem token, segue sem
   }
   return config;
 });
 
-// Trata erro de rede globalmente (sem internet)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
