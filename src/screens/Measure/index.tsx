@@ -8,8 +8,10 @@ import {
 import { useState } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
-import api from "../../services/api";
 import { startUsbMeasurement, MeasurementResult } from "../../services/measurementDevice";
+import { generateLocalId, saveMedicaoLocally } from "../../storage/repository";
+import { enqueueOperation } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 type MeasureParams = {
   farm?: any;
@@ -38,29 +40,41 @@ export default function MeasureScreen() {
 
   const navigation = useNavigation<any>();
 
-  const saveMeasurement = async (temperature: number) => {
+  // Antes: chamava api.post direto e o erro era silenciosamente engolido
+  // (catch vazio no handleMeasure) — no pasto sem sinal, a medição lida do
+  // dispositivo simplesmente sumia. Agora ela é gravada local na hora
+  // (e a notificação de febre/hipotermia, se for o caso, já é gerada
+  // junto por saveMedicaoLocally) e só depois enfileirada pro outbox.
+  const saveMeasurement = (temperature: number) => {
     const idAnimal = animal?.id_animal ?? animal?.id ?? null;
     if (!idAnimal) return;
 
     const now = new Date().toISOString();
-
-    const payload = {
+    const medicaoPayload = {
       temp: temperature,
       datahora: now,
-      id_animal: idAnimal,
+      id_animal: String(idAnimal),
     };
 
-    await api.post("/medicoes", payload);
+    const localId = generateLocalId("medicao");
+    saveMedicaoLocally(medicaoPayload, localId);
+
+    enqueueOperation({
+      entity: "medicao",
+      localId,
+      method: "post",
+      endpoint: "/medicoes",
+      payload: medicaoPayload,
+    });
+
+    runSync();
   };
 
   const handleMeasure = async () => {
     if (status === "success" || status === "warning") {
-      try {
-        if (lastTemperature !== null && !recordSaved) {
-          await saveMeasurement(lastTemperature);
-          setRecordSaved(true);
-        }
-      } catch (_) {
+      if (lastTemperature !== null && !recordSaved) {
+        saveMeasurement(lastTemperature);
+        setRecordSaved(true);
       }
       navigation.navigate("Animal", { animal, farm });
       return;

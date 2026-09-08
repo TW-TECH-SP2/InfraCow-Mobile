@@ -2,7 +2,8 @@ import { View, Image, Alert, Platform, TouchableOpacity } from "react-native";
 import Text from "../../components/Text";
 import { useEffect, useState, useRef } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import api from "../../services/api";
+import { getAllAnimais } from "../../storage/repository";
+import { runSync } from "../../services/syncManager";
 import styles from "./styles";
 
 export default function PositionRfidScreen() {
@@ -129,12 +130,11 @@ export default function PositionRfidScreen() {
 
       setMensagem('Identificando animal...');
 
-      const resp = await api.get('/animais');
-      const allAnimals = Array.isArray(resp.data)
-        ? resp.data
-        : Array.isArray(resp.data?.animais)
-        ? resp.data.animais
-        : [];
+      // Lê direto do SQLite local — a leitura do brinco precisa funcionar
+      // sem sinal no pasto. Dispara um sync em segundo plano (sem esperar)
+      // só pra deixar a base local mais atualizada da próxima vez.
+      runSync().catch(() => {});
+      const allAnimals = getAllAnimais();
 
       const farmAnimals = farmId
         ? allAnimals.filter((a: any) => String(a.id_fazenda ?? '') === String(farmId))

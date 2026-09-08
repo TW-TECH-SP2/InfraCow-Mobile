@@ -5,7 +5,8 @@ import React from "react";
 import styles from "./styles";
 import Navbar from "../../components/Navbar";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
-import api from "../../services/api";
+import { getFazendas } from "../../storage/repository";
+import { runSync } from "../../services/syncManager";
 
 type FarmItem = {
   id_fazenda: number;
@@ -23,7 +24,11 @@ const API_URL = "https://infracow-api-hv24.onrender.com";
 
 const getImageUrl = (imagePath?: string | null) => {
   if (!imagePath) return FALLBACK_IMAGE;
-  if (imagePath.startsWith("http")) return { uri: imagePath };
+  // file:/blob:/data: = imagem salva localmente (cadastro feito offline,
+  // ainda não sincronizado). http(s) = já veio do servidor.
+  if (/^https?:\/\//i.test(imagePath) || /^(file:|blob:|data:)/i.test(imagePath)) {
+    return { uri: imagePath };
+  }
   const cleanPath = imagePath.replace(/^\/+/, "");
   const fullPath = cleanPath.startsWith("uploads/") ? cleanPath : `uploads/${cleanPath}`;
   return { uri: `${API_URL}/${fullPath}` };
@@ -38,23 +43,39 @@ const formatAddress = (farm: FarmItem) => {
 
 export default function HomeScreen() {
   const [farms, setFarms] = useState<FarmItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation<any>();
 
-  const loadFarms = async () => {
+  // Lê o espelho local (SQLite) na hora — funciona com ou sem internet,
+  // e já mostra fazendas cadastradas offline que ainda não sincronizaram.
+  const loadFromLocal = () => {
     try {
-      const response = await api.get("/fazendas");
-      const list = response.data?.fazendas || response.data || [];
-      console.log("[Home] API retornou:", list.length, "fazendas");
+      const list = getFazendas();
       setFarms(list);
     } catch (error) {
-      console.error("[Home] Erro ao carregar fazendas:", error);
-      setFarms([]);
+      console.error("[Home] Erro ao ler fazendas locais:", error);
+    }
+  };
+
+  // Sincroniza (envia pendências + baixa o que há de novo no servidor)
+  // e só então relê o local pra refletir o resultado. Sem internet,
+  // runSync() simplesmente não faz nada e a tela continua com o que já tinha.
+  const syncAndReload = async () => {
+    loadFromLocal();
+    setRefreshing(true);
+    try {
+      await runSync();
+    } catch (error) {
+      console.error("[Home] Erro ao sincronizar:", error);
+    } finally {
+      loadFromLocal();
+      setRefreshing(false);
     }
   };
 
   useFocusEffect(
     React.useCallback(() => {
-      loadFarms();
+      syncAndReload();
     }, [])
   );
 
@@ -74,8 +95,8 @@ export default function HomeScreen() {
         data={farms}
         keyExtractor={(item) => String(item.id_fazenda)}
         contentContainerStyle={{ paddingBottom: 100 }}
-        onRefresh={loadFarms}
-        refreshing={false}
+        onRefresh={syncAndReload}
+        refreshing={refreshing}
         ListEmptyComponent={
           <View style={{ paddingVertical: 28, alignItems: "center" }}>
             <Text style={styles.cardText}>Você ainda não cadastrou fazendas.</Text>

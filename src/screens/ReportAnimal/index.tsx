@@ -8,7 +8,7 @@ import {
 import styles from "./styles";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useEffect, useState } from "react";
-import api from "../../services/api";
+import { getAnimalById, getMedicoesByAnimal } from "../../storage/repository";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
@@ -39,12 +39,12 @@ export default function ReportAnimal() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const load = async () => {
+    const load = () => {
       try {
         setLoading(true);
         setError(null);
-        const animal = route.params?.animal ?? null;
-        const animalId = animal?.id_animal ?? animal?.id ?? null;
+        const animalParam = route.params?.animal ?? null;
+        const animalId = animalParam?.id_animal ?? animalParam?.id ?? null;
 
         if (!animalId) {
           setError('Animal inválido');
@@ -52,19 +52,17 @@ export default function ReportAnimal() {
           return;
         }
 
-        const animalResp = await api.get(`/animais/${animalId}`);
-        const animalInfo = animalResp.data?.animal ?? animalResp.data ?? null;
+        // Prioriza a cópia mais atual salva no SQLite; cai pro que veio
+        // por navigation.params se por algum motivo não achar local.
+        const animalInfo = getAnimalById(String(animalId)) ?? animalParam;
         if (animalInfo) {
           setAnimalName(animalInfo.nome_animal ?? 'Animal');
           setAnimalData(animalInfo);
         }
 
-        const respMedicoes = await api.get('/medicoes');
-        const todasMedicoes: any[] = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
-
-        const medicoesDoAnimal = todasMedicoes
-          .filter((m: any) => String(m.id_animal) === String(animalId))
-          .sort((a: any, b: any) => new Date(b.datahora).getTime() - new Date(a.datahora).getTime());
+        const medicoesDoAnimal = [...getMedicoesByAnimal(String(animalId))].sort(
+          (a: any, b: any) => new Date(b.datahora).getTime() - new Date(a.datahora).getTime()
+        );
 
         const mapped: Medicao[] = medicoesDoAnimal
           .map((m: any) => ({

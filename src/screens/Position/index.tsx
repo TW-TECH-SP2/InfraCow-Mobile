@@ -1,14 +1,21 @@
 import { View, Image, StyleSheet } from "react-native";
 import Text from "../../components/Text";
-import { useState } from "react";
-import { useRoute } from "@react-navigation/native";
+import { useEffect, useRef, useState } from "react";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import styles from "./styles";
 
 type PositionStatus = "red" | "yellow" | "green";
 
+// Tempo (em segundos) que a tela de posicionamento fica visível
+// antes de seguir automaticamente para a medição.
+// TODO: remover/ajustar quando a IA de reconhecimento do olho
+// passar a controlar esse avanço (ex: só liberar quando status === "green").
+const AUTO_ADVANCE_SECONDS = 2;
+
 export default function PositionScreen() {
   const route = useRoute<any>();
+  const navigation = useNavigation<any>();
 
   const farm = route.params?.farm ?? null;
   const animal = route.params?.animal ?? null;
@@ -19,6 +26,27 @@ export default function PositionScreen() {
   // Futuramente a IA vai alterar esse estado.
   const [positionStatus, setPositionStatus] =
     useState<PositionStatus>("green");
+
+  const [secondsLeft, setSecondsLeft] = useState(AUTO_ADVANCE_SECONDS);
+  const hasNavigatedRef = useRef(false);
+
+  useEffect(() => {
+    if (!permission?.granted) return;
+
+    if (secondsLeft <= 0) {
+      if (!hasNavigatedRef.current) {
+        hasNavigatedRef.current = true;
+        navigation.replace("MeasureScreen", { farm, animal });
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setSecondsLeft((prev) => prev - 1);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [secondsLeft, permission?.granted, navigation, farm, animal]);
 
   const getEyeImage = () => {
     switch (positionStatus) {
@@ -73,6 +101,8 @@ export default function PositionScreen() {
           style={styles.eyeImage}
           resizeMode="contain"
         />
+
+        <Text style={styles.countdownText}>{secondsLeft}</Text>
       </View>
     </View>
   );

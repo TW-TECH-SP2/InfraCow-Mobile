@@ -5,7 +5,9 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
 import { saveImageLocally } from "../../services/imageStorage";
-import api from "../../services/api";
+import { generateLocalId, saveAnimalLocally } from "../../storage/repository";
+import { enqueueOperation } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 const gerarCodigoAleatorio = () => {
   const num = Math.floor(Math.random() * 900000) + 100000;
@@ -109,31 +111,49 @@ export default function RegisterAnimal() {
 
     setLoading(true);
     try {
+      // imageAsset.localUri já é persistente (copiado em abrirGaleria via
+      // saveImageLocally), então nada muda aqui pra imagem.
       const localImageUri = imageAsset?.localUri ?? imageAsset?.uri ?? null;
-      const form = new FormData();
-      form.append('nome_animal', name);
-      form.append('codigo', codigo);
-      form.append('genero', genero);
-      form.append('tipo', tipo);
-      form.append('raca', raca);
-      form.append('peso', String(peso));
-      form.append('idade', String(idade));
-      form.append('id_fazenda', farmId);
 
-      if (localImageUri && Platform.OS !== 'web') {
-        const filename = localImageUri.split('/').pop() || 'photo.jpg';
-        const ext = filename.match(/\.(\w+)$/)?.[1] ?? 'jpg';
-        (form as any).append('imagem', { uri: localImageUri, name: filename, type: `image/${ext}` });
-      }
+      const animalPayload = {
+        nome_animal: name,
+        codigo,
+        genero,
+        tipo,
+        raca,
+        peso: String(peso),
+        idade: String(idade),
+        id_fazenda: farmId,
+      };
 
-      await api.post('/animais', form);
-      Alert.alert('Sucesso', 'Animal cadastrado com sucesso.', [
+      // 1) Grava local na hora — o animal já aparece no rebanho/lista mesmo
+      //    sem rede. Se farmId ainda for um id local (fazenda criada offline
+      //    no mesmo dia), fica registrado assim mesmo: o outbox propaga o
+      //    id_fazenda definitivo pra esse payload quando a fazenda sincronizar
+      //    (replaceLocalFazendaId, no repository.ts).
+      const localId = generateLocalId('animal');
+      saveAnimalLocally(animalPayload, localId, farmId);
+
+      // 2) Enfileira o POST /animais real pro outbox.
+      enqueueOperation({
+        entity: 'animal',
+        localId,
+        method: 'post',
+        endpoint: '/animais',
+        payload: animalPayload,
+        localImageUri,
+        imageField: 'imagem',
+      });
+
+      // 3) Tenta sincronizar já, em segundo plano (não bloqueia se offline).
+      runSync();
+
+      Alert.alert('Sucesso', 'Animal cadastrado. Será sincronizado automaticamente quando houver internet.', [
         { text: 'OK', onPress: () => navigation.navigate('Herd', { farm: routeFarm }) },
       ]);
     } catch (error: any) {
-      console.error('[RegisterAnimal] Erro:', error?.response?.status, JSON.stringify(error?.response?.data));
-      const message = error?.response?.data?.message ?? error?.response?.data?.error ?? error?.message ?? 'Erro desconhecido';
-      Alert.alert('Erro', 'Não foi possível cadastrar o animal: ' + message);
+      console.error('[RegisterAnimal] Erro:', error?.message);
+      Alert.alert('Erro', 'Não foi possível salvar o animal localmente: ' + (error?.message ?? 'erro desconhecido'));
     } finally {
       setLoading(false);
     }

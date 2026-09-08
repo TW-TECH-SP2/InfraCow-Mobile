@@ -6,14 +6,14 @@ import {
   ScrollView,
   TextInput,
   ImageBackground,
-  Alert
 } from "react-native";
 import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
 import React, { useCallback, useMemo, useState } from "react";
 import Navbar from "../../components/Navbar";
 import styles from "./styles";
-import api from "../../services/api";
 import Constants from "expo-constants";
+import { getAnimaisByFazenda, getAllAnimais } from "../../storage/repository";
+import { runSync } from "../../services/syncManager";
 
 const DEFAULT_ANIMAL_IMAGE_FEMALE = require("../../../assets/cow1.png");
 const DEFAULT_ANIMAL_IMAGE_MALE = require("../../../assets/cow4.png");
@@ -68,22 +68,33 @@ export default function MeasureSelectAnimal() {
   const [loadingAnimals, setLoadingAnimals] = useState(true);
   const navigation = useNavigation<any>();
 
-  const loadAnimals = useCallback(async () => {
-    setLoadingAnimals(true);
+  // Lê os animais direto do SQLite local — funciona sem internet e já
+  // mostra animais cadastrados em campo que ainda não sincronizaram.
+  const loadFromLocal = useCallback(() => {
     try {
-      const res = await api.get('/animais');
-      const all = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.animais) ? res.data.animais : [];
-      const filtered = farmId
-        ? all.filter((a: any) => String(a.id_fazenda ?? '') === farmId)
-        : all;
-      console.log('[MeasureSelectAnimal] farmId:', farmId, '| animais:', filtered.length);
+      const filtered = farmId ? getAnimaisByFazenda(farmId) : getAllAnimais();
+      console.log('[MeasureSelectAnimal] farmId:', farmId, '| animais locais:', filtered.length);
       setAnimals(filtered);
-    } catch (error: any) {
-      Alert.alert("Erro", "Não foi possível carregar os animais. Verifique sua conexão.");
-    } finally {
-      setLoadingAnimals(false);
+    } catch (err) {
+      console.error('[MeasureSelectAnimal] Erro ao ler dados locais:', err);
     }
   }, [farmId]);
+
+  // Mostra o que já está salvo local na hora, sincroniza em paralelo (se
+  // houver conexão), e relê quando terminar. Sem internet, fica só no que
+  // já tinha local — é exatamente o fluxo que precisa funcionar no pasto.
+  const loadAnimals = useCallback(async () => {
+    setLoadingAnimals(true);
+    loadFromLocal();
+    try {
+      await runSync();
+    } catch (err) {
+      console.error('[MeasureSelectAnimal] Erro ao sincronizar:', err);
+    } finally {
+      loadFromLocal();
+      setLoadingAnimals(false);
+    }
+  }, [loadFromLocal]);
 
   useFocusEffect(useCallback(() => {
     loadAnimals();

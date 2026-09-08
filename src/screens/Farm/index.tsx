@@ -8,14 +8,18 @@ import styles from "./styles";
 import { LinearGradient } from "expo-linear-gradient";
 import Navbar from "../../components/Navbar";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import api from "../../services/api";
+import { getAnimaisByFazenda, getMedicoesByAnimal, deleteFazendaLocally } from "../../storage/repository";
+import { enqueueOperation } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 const DEFAULT_FARM_IMAGE = require("../../../assets/farm1.png");
 const API_URL = "https://infracow-api-hv24.onrender.com";
 
 const getImageUrl = (imagePath?: string | null): ImageSourcePropType => {
   if (!imagePath) return DEFAULT_FARM_IMAGE;
-  if (imagePath.startsWith("http")) return { uri: imagePath };
+  if (/^https?:\/\//i.test(imagePath) || /^(file:|blob:|data:)/i.test(imagePath)) {
+    return { uri: imagePath };
+  }
   const cleanPath = imagePath.replace(/^\/+/, "");
   const fullPath = cleanPath.startsWith("uploads/") ? cleanPath : `uploads/${cleanPath}`;
   return { uri: `${API_URL}/${fullPath}` };
@@ -169,15 +173,14 @@ export default function FarmScreen() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [loadingDelete, setLoadingDelete] = useState(false);
 
-  const loadFarm = useCallback(async () => {
+  // Lê animais e medições direto do SQLite local — os números da tela
+  // (total/fêmeas/machos/temperatura média) refletem o que está salvo no
+  // celular, com ou sem internet.
+  const loadFromLocal = useCallback(() => {
     if (!farmId) return;
 
-    let farmAnimals: any[] = [];
-
     try {
-      const animalsRes = await api.get("/animais");
-      const allAnimals = extractAnimals(animalsRes.data);
-      farmAnimals = allAnimals.filter((a: any) => getAnimalFarmId(a) === String(farmId));
+      const farmAnimals = getAnimaisByFazenda(String(farmId));
 
       const total = farmAnimals.length;
       const females = farmAnimals.filter((a: any) => detectGender(a.genero ?? a.genero_animal ?? a.generoAnimal ?? a.sexo) === "female").length;
@@ -193,16 +196,10 @@ export default function FarmScreen() {
       }));
 
       setHeaderSource(getImageUrl(paramFarm?.imagem));
-    } catch (err) {
-      console.error("[Farm] Erro ao carregar animais:", err);
-      return;
-    }
 
-    try {
-      const measurementsRes = await api.get("/medicoes");
-      const allMeasurements = extractMeasurements(measurementsRes.data);
-      const animalIds = new Set(farmAnimals.map((a: any) => getAnimalId(a)));
-      const farmMeasurements = allMeasurements.filter((m: any) => animalIds.has(String(m.id_animal ?? m.idAnimal ?? m.animal_id ?? m.animalId ?? "")));
+      // getMedicoesByAnimal já existe no repository — só juntar as medições
+      // de cada animal da fazenda.
+      const farmMeasurements = farmAnimals.flatMap((a: any) => getMedicoesByAnimal(getAnimalId(a)));
 
       let avgTemp = null;
       if (farmMeasurements.length > 0) {
@@ -216,9 +213,23 @@ export default function FarmScreen() {
 
       setFarmData((prev) => ({ ...prev, averageTemperature: avgTemp }));
     } catch (err) {
-      console.error("[Farm] Erro ao carregar medições:", err);
+      console.error("[Farm] Erro ao ler dados locais:", err);
     }
-  }, [paramFarm]);
+  }, [farmId, paramFarm]);
+
+  // Mostra o que já está salvo local na hora, sincroniza em paralelo
+  // (baixa o que há de novo do servidor + envia pendências) e relê.
+  const loadFarm = useCallback(async () => {
+    if (!farmId) return;
+    loadFromLocal();
+    try {
+      await runSync();
+    } catch (err) {
+      console.error("[Farm] Erro ao sincronizar:", err);
+    } finally {
+      loadFromLocal();
+    }
+  }, [farmId, loadFromLocal]);
 
   useFocusEffect(
     useCallback(() => {
@@ -228,14 +239,38 @@ export default function FarmScreen() {
 
   const handleDeleteFarm = async () => {
     if (!farmId) return;
+    const id = String(farmId);
+    const isLocalOnly = id.startsWith('local_');
 
+    setLoadingDelete(true);
     try {
-      setLoadingDelete(true);
-      await api.delete(`/fazendas/${farmId}`);
-      Alert.alert("Sucesso", "Fazenda deletada com sucesso.");
+      // Remove local na hora — fazenda, animais, medições e notificações
+      // dela, e cancela qualquer operação pendente no outbox (deletar
+      // precisa funcionar sem internet, igual o resto do app).
+      deleteFazendaLocally(id);
+
+      if (!isLocalOnly) {
+        // Só existe no servidor se não for um id local que nunca sincronizou.
+        enqueueOperation({
+          entity: 'fazenda',
+          localId: id,
+          method: 'delete',
+          endpoint: `/fazendas/${id}`,
+          payload: {},
+        });
+        runSync().catch((err) => console.error('[Farm] Erro ao sincronizar exclusão:', err));
+      }
+
+      Alert.alert(
+        'Sucesso',
+        isLocalOnly
+          ? 'Fazenda deletada.'
+          : 'Fazenda deletada. Será removida do servidor assim que houver internet.'
+      );
       navigation.goBack();
     } catch (err: any) {
-      Alert.alert("Erro", err?.response?.data?.message || err?.message || "Falha ao deletar fazenda.");
+      console.error('[Farm] Erro ao deletar fazenda:', err);
+      Alert.alert('Erro', 'Não foi possível deletar a fazenda.');
     } finally {
       setLoadingDelete(false);
       setShowDeleteModal(false);

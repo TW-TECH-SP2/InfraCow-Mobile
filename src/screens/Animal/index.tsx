@@ -19,7 +19,9 @@ import { BarChart } from "react-native-chart-kit";
 import DateTimePickerModal from "react-native-modal-datetime-picker";
 import { useWindowDimensions } from "react-native";
 import Constants from "expo-constants";
-import api from "../../services/api";
+import { getMedicoesByAnimal, deleteAnimalLocally } from "../../storage/repository";
+import { enqueueOperation } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 const DEFAULT_ANIMAL_IMAGE = require("../../../assets/cow1.png");
 
@@ -78,52 +80,36 @@ export default function AnimalScreen() {
     setHeaderImageSource(resolveAnimalImage(animalImage));
   }, [animalImage]);
 
-  useEffect(() => {
-    fetchUltimaMedicao();
-  }, [animal]);
-
-  useEffect(() => {
-    fetchMedicoesPorPeriodo();
-  }, [startDate, endDate, animal]);
-
-  const fetchUltimaMedicao = async () => {
+  // Lê as medições do animal direto do SQLite local — funciona sem
+  // internet, tanto pra "última medição" quanto pro gráfico do período.
+  const loadUltimaMedicaoFromLocal = () => {
     const animalId = animal?.id_animal ?? animal?.id ?? null;
     if (!animalId) return;
-    try {
-      const respMedicoes = await api.get('/medicoes');
-      const todasMedicoes: any[] = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
-      const medicoesDoAnimal = todasMedicoes
-        .filter((m: any) => String(m.id_animal) === String(animalId))
-        .sort((a: any, b: any) => new Date(b.datahora).getTime() - new Date(a.datahora).getTime());
-      if (medicoesDoAnimal.length > 0) {
-        setUltimaMedicao(Number(medicoesDoAnimal[0].temp));
-        const d = new Date(medicoesDoAnimal[0].datahora);
-        setDataUltimaMedicao(
-          `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-        );
-      }
-    } catch (err) {
-      console.error('Erro ao buscar última medição:', err);
+    const medicoesDoAnimal = getMedicoesByAnimal(String(animalId));
+    if (medicoesDoAnimal.length > 0) {
+      const ultima = medicoesDoAnimal[0]; // getMedicoesByAnimal já ordena por datahora DESC
+      setUltimaMedicao(Number(ultima.temp));
+      const d = new Date(ultima.datahora);
+      setDataUltimaMedicao(
+        `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+      );
     }
   };
 
-  const fetchMedicoesPorPeriodo = async () => {
+  const loadMedicoesPorPeriodoFromLocal = () => {
     const animalId = animal?.id_animal ?? animal?.id ?? null;
     if (!animalId) return;
 
     setLoadingChart(true);
     try {
-      const respMedicoes = await api.get('/medicoes');
-      const todasMedicoes: any[] = Array.isArray(respMedicoes.data) ? respMedicoes.data : Array.isArray(respMedicoes.data?.medicoes) ? respMedicoes.data.medicoes : [];
-      
+      const todasMedicoes = getMedicoesByAnimal(String(animalId));
+
       const medicoesFiltradas = todasMedicoes.filter((m: any) => {
-        const idMatch = String(m.id_animal) === String(animalId);
         const dataMedicao = new Date(m.datahora);
         const dataInicio = new Date(startDate);
         const dataFim = new Date(endDate);
         dataFim.setHours(23, 59, 59);
-        const dataMatch = dataMedicao >= dataInicio && dataMedicao <= dataFim;
-        return idMatch && dataMatch;
+        return dataMedicao >= dataInicio && dataMedicao <= dataFim;
       });
 
       medicoesFiltradas.sort((a: any, b: any) => new Date(a.datahora).getTime() - new Date(b.datahora).getTime());
@@ -131,7 +117,6 @@ export default function AnimalScreen() {
       if (medicoesFiltradas.length === 0) {
         setChartData({ labels: [], datasets: [{ data: [] }] });
         setVariacaoTemp(0);
-        setLoadingChart(false);
         return;
       }
 
@@ -151,14 +136,29 @@ export default function AnimalScreen() {
         datasets: [{ data: temperatures }]
       });
       setVariacaoTemp(variacao);
-
     } catch (err) {
-      console.error('Erro ao buscar medições:', err);
-      Alert.alert('Erro', 'Não foi possível carregar as medições');
+      console.error('[Animal] Erro ao ler medições locais:', err);
     } finally {
       setLoadingChart(false);
     }
   };
+
+  // Ao focar a tela, mostra o que já está local na hora e sincroniza em
+  // segundo plano (se houver conexão); quando terminar, relê do local.
+  useEffect(() => {
+    loadUltimaMedicaoFromLocal();
+    loadMedicoesPorPeriodoFromLocal();
+    runSync()
+      .catch((err) => console.error('[Animal] Erro ao sincronizar:', err))
+      .finally(() => {
+        loadUltimaMedicaoFromLocal();
+        loadMedicoesPorPeriodoFromLocal();
+      });
+  }, [animal]);
+
+  useEffect(() => {
+    loadMedicoesPorPeriodoFromLocal();
+  }, [startDate, endDate]);
 
   const getTemperatureData = (temp?: number | null) => {
     if (temp === null || temp === undefined) {
@@ -171,17 +171,32 @@ export default function AnimalScreen() {
   };
 
   const handleDeleteAnimal = async () => {
-    const animalId = animal?.id_animal ?? animal?.id;
+    const animalId = String(animal?.id_animal ?? animal?.id ?? '');
     if (!animalId) return;
+    const isLocalOnly = animalId.startsWith('local_');
 
     setLoadingDelete(true);
     try {
-      await api.delete(`/animais/${animalId}`);
+      // Remove local na hora — animal, medições e notificações dele, e
+      // cancela qualquer operação pendente no outbox.
+      deleteAnimalLocally(animalId);
+
+      if (!isLocalOnly) {
+        enqueueOperation({
+          entity: 'animal',
+          localId: animalId,
+          method: 'delete',
+          endpoint: `/animais/${animalId}`,
+          payload: {},
+        });
+        runSync().catch((err) => console.error('[Animal] Erro ao sincronizar exclusão:', err));
+      }
+
       Alert.alert('Sucesso', 'Animal deletado com sucesso.');
       navigation.goBack();
     } catch (err: any) {
-      console.error('Animal Delete error:', err);
-      Alert.alert('Erro', err?.response?.data?.message ?? err?.message ?? 'Erro inesperado ao deletar animal');
+      console.error('[Animal] Erro ao deletar animal:', err);
+      Alert.alert('Erro', 'Não foi possível deletar o animal.');
     } finally {
       setLoadingDelete(false);
       setShowDeleteModal(false);

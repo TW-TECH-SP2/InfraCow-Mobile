@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useNavigation } from "@react-navigation/native";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
-import api from "../../services/api";
+import { saveImageLocally } from "../../services/imageStorage";
+import { generateLocalId, saveFazendaLocally } from "../../storage/repository";
+import { enqueueOperation } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 export default function RegisterFarm() {
   const navigation = useNavigation<any>();
@@ -48,37 +51,58 @@ export default function RegisterFarm() {
     setLoading(true);
 
     try {
-      const formData = new FormData();
-      formData.append('nome_fazenda', name);
-      formData.append('rua', street);
-      formData.append('bairro', neighborhood);
-      formData.append('cidade', city);
-      formData.append('CEP', cep);
-      formData.append('numero', String(numeroInt));
-
+      // Copia a foto (se houver) pra um diretório persistente do app.
+      // A uri que vem do ImagePicker é de cache e pode sumir antes de
+      // sincronizarmos — sem isso, uma fazenda cadastrada offline hoje
+      // pode perder a foto quando o outbox tentar enviá-la mais tarde.
+      let localImageUri: string | null = null;
       if (foto && Platform.OS !== 'web') {
-        const filename = foto.split('/').pop() || 'photo.jpg';
-        const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : 'image/jpeg';
-        (formData as any).append('imagem', {
-          uri: foto,
-          name: filename,
-          type: type,
-        });
+        try {
+          const savedImage = await saveImageLocally(foto, 'image/jpeg');
+          localImageUri = savedImage.localUri;
+        } catch {
+          localImageUri = foto;
+        }
       }
 
-      const response = await api.post('/fazendas', formData);
-      const createdFarm = response.data?.fazenda ?? response.data;
-      
-      if (createdFarm?.id_fazenda) {
-        Alert.alert('Sucesso', 'Fazenda cadastrada!');
-        navigation.navigate('Farm', { farm: createdFarm });
-      } else {
-        throw new Error('ID não retornado');
-      }
-      
+      const fazendaPayload = {
+        nome_fazenda: name,
+        rua: street,
+        bairro: neighborhood,
+        cidade: city,
+        CEP: cep,
+        numero: numeroInt,
+      };
+
+      // 1) Gera um id local e grava na SQLite na hora — a fazenda já existe
+      //    pro resto do app (Farm, Herd, seleção de fazenda) mesmo sem rede.
+      const localId = generateLocalId('fazenda');
+      saveFazendaLocally(fazendaPayload, localId);
+
+      // 2) Enfileira a operação real (POST /fazendas) pro outbox. Quando
+      //    sincronizar, o id local vira o id_fazenda definitivo do servidor
+      //    (replaceLocalFazendaId, já existente no repository).
+      enqueueOperation({
+        entity: 'fazenda',
+        localId,
+        method: 'post',
+        endpoint: '/fazendas',
+        payload: fazendaPayload,
+        localImageUri,
+        imageField: 'imagem',
+      });
+
+      // 3) Tenta sincronizar imediatamente em segundo plano. Se não houver
+      //    internet, runSync simplesmente não faz nada e a fila fica pra
+      //    depois — não bloqueia a navegação do usuário.
+      runSync();
+
+      const localFarm = { ...fazendaPayload, id_fazenda: localId, imagem: localImageUri ?? null };
+
+      Alert.alert('Sucesso', 'Fazenda cadastrada! Será sincronizada automaticamente quando houver internet.');
+      navigation.navigate('Farm', { farm: localFarm });
     } catch (error: any) {
-      Alert.alert('Erro', error?.response?.data?.message || error?.message || 'Erro ao cadastrar');
+      Alert.alert('Erro', error?.message || 'Erro ao cadastrar');
     } finally {
       setLoading(false);
     }
@@ -115,11 +139,11 @@ export default function RegisterFarm() {
             </View>
             <View style={styles.halfField}>
               <Text style={styles.inputLabel}>Número: *</Text>
-              <TextInput 
-                style={styles.input} 
-                placeholder="Ex.: 135" 
-                placeholderTextColor="#D3D3D3" 
-                value={number} 
+              <TextInput
+                style={styles.input}
+                placeholder="Ex.: 135"
+                placeholderTextColor="#D3D3D3"
+                value={number}
                 onChangeText={setNumber}
                 keyboardType="numeric"
               />

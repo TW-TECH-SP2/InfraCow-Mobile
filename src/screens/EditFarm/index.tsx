@@ -1,13 +1,15 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, Platform, ImageSourcePropType, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ImageSourcePropType, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
 import { saveImageLocally } from "../../services/imageStorage";
-import api from "../../services/api";
 import Constants from "expo-constants";
 import Navbar from "../../components/Navbar";
+import { getFazendas, updateFazendaLocally } from "../../storage/repository";
+import { enqueueOperation, updatePendingCreatePayload } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 const DEFAULT_FARM_IMAGE = require("../../../assets/farm1.png");
 
@@ -33,7 +35,7 @@ export default function EditFarm() {
 
   const farm = route.params?.farm ?? {};
   const rawFarmId = farm.id_fazenda ?? farm.id ?? null;
-  const farmId = rawFarmId !== null && /^\d+$/.test(String(rawFarmId)) ? String(rawFarmId) : null;
+  const lookupId = rawFarmId !== null && rawFarmId !== undefined && String(rawFarmId).trim() !== "" ? String(rawFarmId) : null;
 
   const [foto, setFoto] = useState<string | null>(null);
   const [imageAsset, setImageAsset] = useState<any>(null);
@@ -48,40 +50,34 @@ export default function EditFarm() {
   const [number, setNumber] = useState("");
 
   useEffect(() => {
-    const loadFarmDetails = async () => {
-      if (!farmId) {
-        setName(farm.nome_fazenda ?? farm.nome ?? farm.name ?? "");
-        setStreet(farm.rua ?? farm.street ?? farm.endereco ?? "");
-        setNeighborhood(farm.bairro ?? farm.neighborhood ?? "");
-        setCity(farm.cidade ?? farm.city ?? "");
-        setCep(farm.CEP ?? farm.cep ?? "");
-        setNumber(String(farm.numero ?? farm.number ?? ""));
-        setFoto(farm.localImageUri ?? farm.imagem ?? farm.image ?? null);
-        return;
-      }
-      try {
-        const res = await api.get(`/fazendas/${farmId}`);
-        const farmToUse = res.data?.fazenda ?? res.data ?? farm;
-        setName(farmToUse.nome_fazenda ?? farmToUse.nome ?? farmToUse.name ?? "");
-        setStreet(farmToUse.rua ?? farmToUse.street ?? farmToUse.endereco ?? "");
-        setNeighborhood(farmToUse.bairro ?? farmToUse.neighborhood ?? "");
-        setCity(farmToUse.cidade ?? farmToUse.city ?? "");
-        setCep(farmToUse.CEP ?? farmToUse.cep ?? "");
-        setNumber(String(farmToUse.numero ?? farmToUse.number ?? ""));
-        setFoto(farmToUse.localImageUri ?? farmToUse.imagem ?? farmToUse.image ?? null);
-      } catch (err) {
-        setName(farm.nome_fazenda ?? farm.nome ?? farm.name ?? "");
-        setStreet(farm.rua ?? farm.street ?? farm.endereco ?? "");
-        setNeighborhood(farm.bairro ?? farm.neighborhood ?? "");
-        setCity(farm.cidade ?? farm.city ?? "");
-        setCep(farm.CEP ?? farm.cep ?? "");
-        setNumber(String(farm.numero ?? farm.number ?? ""));
-        setFoto(farm.localImageUri ?? farm.imagem ?? farm.image ?? null);
-      }
+    // Lê os dados da fazenda direto do SQLite local — funciona sem
+    // internet. O registro local já tem tudo que a API retornaria (é
+    // mantido sincronizado pelo pullFromServer), então não precisa mais
+    // chamar /fazendas/:id.
+    const applyFarmData = (source: any) => {
+      setName(source.nome_fazenda ?? source.nome ?? source.name ?? "");
+      setStreet(source.rua ?? source.street ?? source.endereco ?? "");
+      setNeighborhood(source.bairro ?? source.neighborhood ?? "");
+      setCity(source.cidade ?? source.city ?? "");
+      setCep(source.CEP ?? source.cep ?? "");
+      setNumber(String(source.numero ?? source.number ?? ""));
+      setFoto(source.localImageUri ?? source.imagem ?? source.image ?? null);
     };
 
-    loadFarmDetails();
-  }, [farmId]);
+    if (!lookupId) {
+      applyFarmData(farm);
+      return;
+    }
+
+    try {
+      const localFarms = getFazendas();
+      const localFarm = localFarms.find((f: any) => String(f.id_fazenda ?? f.id ?? "") === lookupId);
+      applyFarmData(localFarm ?? farm);
+    } catch (err) {
+      console.error('[EditFarm] Erro ao ler dados locais:', err);
+      applyFarmData(farm);
+    }
+  }, [lookupId]);
 
   const abrirGaleria = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -110,7 +106,7 @@ export default function EditFarm() {
   };
 
   const handleSave = async () => {
-    if (!farmId) {
+    if (!lookupId) {
       Alert.alert('Erro', 'Fazenda não encontrada.');
       return;
     }
@@ -118,43 +114,49 @@ export default function EditFarm() {
     setLoading(true);
 
     try {
-      const form = new FormData();
-      if (name) form.append('nome_fazenda', name);
-      if (street) form.append('rua', street);
-      if (neighborhood) form.append('bairro', neighborhood);
-      if (city) form.append('cidade', city);
-      if (cep) form.append('CEP', cep);
-      if (number) form.append('numero', number);
+      const patch: Record<string, any> = {};
+      if (name) patch.nome_fazenda = name;
+      if (street) patch.rua = street;
+      if (neighborhood) patch.bairro = neighborhood;
+      if (city) patch.cidade = city;
+      if (cep) patch.CEP = cep;
+      if (number) patch.numero = number;
+      if (imageAsset?.localUri) patch.localImageUri = imageAsset.localUri;
 
-      if (imageAsset?.uri) {
-        const uri: string = imageAsset.uri;
-        const filename = uri.split('/').pop() || 'photo.jpg';
-        const match = filename.match(/\.(\w+)$/);
-        const ext = match ? match[1] : 'jpg';
-        const type = imageAsset.type ?? `image/${ext}`;
+      // Atualiza o registro local na hora — a edição aparece na tela mesmo
+      // sem internet.
+      updateFazendaLocally(lookupId, patch);
 
-        if (Platform.OS === 'web') {
-          try {
-            const resp = await fetch(uri);
-            const blob = await resp.blob();
-            const file = new File([blob], filename, { type: blob.type || type });
-            form.append('imagem', file);
-          } catch (e) {
-            console.warn('Could not convert image uri to blob on web', e);
-          }
-        } else {
-          form.append('imagem', { uri, name: filename, type } as any);
-        }
+      if (lookupId.startsWith('local_')) {
+        // Fazenda ainda não sincronizou: atualiza o payload do POST
+        // pendente em vez de mandar um PUT pra um id que o servidor nem
+        // conhece ainda.
+        updatePendingCreatePayload(
+          lookupId,
+          patch,
+          imageAsset?.localUri ?? undefined,
+          imageAsset?.localUri ? 'imagem' : undefined
+        );
+      } else {
+        // Já existe no servidor: enfileira um PUT.
+        enqueueOperation({
+          entity: 'fazenda',
+          localId: lookupId,
+          method: 'put',
+          endpoint: `/fazendas/${lookupId}`,
+          payload: patch,
+          localImageUri: imageAsset?.localUri ?? null,
+          imageField: imageAsset?.localUri ? 'imagem' : null,
+        });
+        runSync().catch((err) => console.error('[EditFarm] Erro ao sincronizar edição:', err));
       }
 
-      await api.put(`/fazendas/${farmId}`, form);
-      Alert.alert('Sucesso', 'Fazenda atualizada com sucesso.', [
+      Alert.alert('Sucesso', 'Fazenda atualizada. Será sincronizada automaticamente quando houver internet.', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
-
     } catch (error: any) {
-      console.error('EditFarm error:', error?.response?.status, JSON.stringify(error?.response?.data));
-      Alert.alert('Erro', error?.response?.data?.message || error?.message || 'Erro inesperado ao atualizar fazenda');
+      console.error('[EditFarm] Erro ao salvar:', error);
+      Alert.alert('Erro', 'Não foi possível salvar as alterações.');
     } finally {
       setLoading(false);
     }
