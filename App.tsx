@@ -13,6 +13,8 @@ import {
 
 import Routes from "./src/navigation";
 import auth from './src/services/auth';
+import { initDb } from './src/storage/db';
+import { startSyncListener } from './src/services/syncManager';
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -24,6 +26,18 @@ export default function App() {
 
   React.useEffect(() => {
     const bootstrap = async () => {
+      // Cria as tabelas locais (fazendas, animais, medições, outbox,
+      // notificações) se ainda não existirem. Tem que ser a PRIMEIRA coisa
+      // — sem isso, qualquer leitura/escrita no SQLite quebra com "no such
+      // table". É rápido e síncrono, não precisa de await.
+      initDb();
+
+      // Sincroniza automaticamente sempre que a conexão voltar (ex: saiu
+      // do modo avião no pasto). Sem isso, a fila do outbox só é drenada
+      // quando alguma tela específica focar e chamar runSync() por conta
+      // própria.
+      startSyncListener();
+
       await auth.restoreToken();
 
       if (!__DEV__) {
