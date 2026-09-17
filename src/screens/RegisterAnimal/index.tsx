@@ -1,11 +1,11 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, Platform, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
 import { saveImageLocally } from "../../services/imageStorage";
-import { generateLocalId, saveAnimalLocally } from "../../storage/repository";
+import { generateLocalId, saveAnimalLocally, resolveId, getFazendaById } from "../../storage/repository";
 import { enqueueOperation } from "../../storage/outbox";
 import { runSync } from "../../services/syncManager";
 
@@ -33,11 +33,14 @@ export default function RegisterAnimal() {
   const [tipo, setTipo] = useState("");
 
   const routeFarm = route.params?.farm;
-  const farmIdValue = routeFarm?.id_fazenda ?? routeFarm?.id ?? null;
-  const farmId = farmIdValue !== null && farmIdValue !== undefined && String(farmIdValue).trim() !== ''
-    ? String(farmIdValue)
-    : '';
-  const farmName = routeFarm?.nome_fazenda ?? routeFarm?.name ?? '';
+  const rawFarmId = routeFarm?.id_fazenda ?? routeFarm?.id ?? null;
+
+  // resolveId traduz um id local que já virou id do servidor. Sem isso, um
+  // animal cadastrado logo depois da fazenda ficava amarrado a um id que não
+  // existia mais: sumia do rebanho e o POST /animais era recusado.
+  const farmId = resolveId(rawFarmId);
+  const farmAtual = getFazendaById(farmId) ?? routeFarm;
+  const farmName = farmAtual?.nome_fazenda ?? farmAtual?.name ?? '';
 
   useEffect(() => {
     if (route.params?.rfidCode) {
@@ -79,7 +82,7 @@ export default function RegisterAnimal() {
   const lerTagNfc = () => {
     navigation.navigate('PositionRfid', {
       mode: 'register',
-      farm: routeFarm,
+      farm: farmAtual,
     });
   };
 
@@ -111,10 +114,10 @@ export default function RegisterAnimal() {
 
     setLoading(true);
     try {
-      // imageAsset.localUri já é persistente (copiado em abrirGaleria via
-      // saveImageLocally), então nada muda aqui pra imagem.
       const localImageUri = imageAsset?.localUri ?? imageAsset?.uri ?? null;
 
+      // Vai pro servidor. O id_fazenda é resolvido de novo aqui porque a
+      // fazenda pode ter sincronizado enquanto o formulário estava aberto.
       const animalPayload = {
         nome_animal: name,
         codigo,
@@ -123,18 +126,19 @@ export default function RegisterAnimal() {
         raca,
         peso: String(peso),
         idade: String(idade),
-        id_fazenda: farmId,
+        id_fazenda: resolveId(farmId),
       };
 
-      // 1) Grava local na hora — o animal já aparece no rebanho/lista mesmo
-      //    sem rede. Se farmId ainda for um id local (fazenda criada offline
-      //    no mesmo dia), fica registrado assim mesmo: o outbox propaga o
-      //    id_fazenda definitivo pra esse payload quando a fazenda sincronizar
-      //    (replaceLocalFazendaId, no repository.ts).
+      // Fica no celular — agora COM a foto escolhida (imagem + localImageUri),
+      // que é o que o Rebanho e a tela de medição usam pra exibir o card.
       const localId = generateLocalId('animal');
-      saveAnimalLocally(animalPayload, localId, farmId);
+      const registroLocal = {
+        ...animalPayload,
+        imagem: localImageUri,
+        localImageUri,
+      };
+      saveAnimalLocally(registroLocal, localId, animalPayload.id_fazenda);
 
-      // 2) Enfileira o POST /animais real pro outbox.
       enqueueOperation({
         entity: 'animal',
         localId,
@@ -145,15 +149,12 @@ export default function RegisterAnimal() {
         imageField: 'imagem',
       });
 
-      // 3) Tenta sincronizar já, em segundo plano (não bloqueia se offline).
       runSync();
 
-      Alert.alert('Sucesso', 'Animal cadastrado. Será sincronizado automaticamente quando houver internet.', [
-        { text: 'OK', onPress: () => navigation.navigate('Herd', { farm: routeFarm }) },
-      ]);
+      navigation.navigate('Herd', { farm: farmAtual });
     } catch (error: any) {
       console.error('[RegisterAnimal] Erro:', error?.message);
-      Alert.alert('Erro', 'Não foi possível salvar o animal localmente: ' + (error?.message ?? 'erro desconhecido'));
+      Alert.alert('Erro', 'Não foi possível salvar o animal: ' + (error?.message ?? 'erro desconhecido'));
     } finally {
       setLoading(false);
     }

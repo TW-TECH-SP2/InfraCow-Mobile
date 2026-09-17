@@ -2,6 +2,7 @@ import api from './api';
 import { deleteImageLocally } from './imageStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { clearLocalData } from '../storage/repository';
 
 const SESSION_STORAGE_KEY = '@infracow_kv:session:active';
 const TOKEN_KEY = '@infracow_token';
@@ -170,12 +171,28 @@ const signUp = async (data: any) => {
   return res.data;
 };
 
+/**
+ * ÚNICO lugar do app que encerra a sessão. Só roda quando o usuário toca em
+ * "Sair" de propósito — igual ao WhatsApp: perder sinal, fechar o app,
+ * reiniciar o celular ou receber erro do servidor NUNCA desloga ninguém e
+ * nunca apaga nada. O token fica no AsyncStorage pra sempre até aqui.
+ *
+ * Como o celular pode ser usado por outra pessoa depois, sair também limpa o
+ * banco local (fazendas, animais, medições, notificações e fila de envio).
+ * ATENÇÃO: se houver algo na fila que ainda não subiu pra nuvem, isso se
+ * perde — por isso a tela de Perfil deve avisar antes de confirmar a saída.
+ */
 const signOut = async () => {
   await AsyncStorage.removeItem(TOKEN_KEY);
   try {
     await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
   } catch (e) {
     console.warn('Error clearing session', e);
+  }
+  try {
+    clearLocalData();
+  } catch (e) {
+    console.warn('Error clearing local database', e);
   }
   delete api.defaults.headers.common['Authorization'];
 };

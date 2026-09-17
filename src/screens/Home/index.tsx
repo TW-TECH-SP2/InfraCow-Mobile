@@ -9,7 +9,7 @@ import { getFazendas } from "../../storage/repository";
 import { runSync } from "../../services/syncManager";
 
 type FarmItem = {
-  id_fazenda: number;
+  id_fazenda: number | string;
   nome_fazenda: string;
   rua?: string | null;
   bairro?: string | null;
@@ -17,6 +17,7 @@ type FarmItem = {
   CEP?: string | null;
   numero?: string | number | null;
   imagem?: string | null;
+  localImageUri?: string | null;
 };
 
 const FALLBACK_IMAGE = require("../../../assets/farm1.png");
@@ -24,15 +25,24 @@ const API_URL = "https://infracow-api-hv24.onrender.com";
 
 const getImageUrl = (imagePath?: string | null) => {
   if (!imagePath) return FALLBACK_IMAGE;
-  // file:/blob:/data: = imagem salva localmente (cadastro feito offline,
-  // ainda não sincronizado). http(s) = já veio do servidor.
-  if (/^https?:\/\//i.test(imagePath) || /^(file:|blob:|data:)/i.test(imagePath)) {
-    return { uri: imagePath };
+  const normalized = String(imagePath).trim();
+  if (!normalized || normalized === "null" || normalized === "undefined") return FALLBACK_IMAGE;
+  // file:/blob:/data: = imagem salva no próprio celular (cadastro offline ou
+  // já sincronizado). http(s) = veio do servidor.
+  if (/^https?:\/\//i.test(normalized) || /^(file:|blob:|data:)/i.test(normalized)) {
+    return { uri: normalized };
   }
-  const cleanPath = imagePath.replace(/^\/+/, "");
+  const cleanPath = normalized.replace(/^\/+/, "");
   const fullPath = cleanPath.startsWith("uploads/") ? cleanPath : `uploads/${cleanPath}`;
   return { uri: `${API_URL}/${fullPath}` };
 };
+
+/**
+ * A foto guardada no aparelho tem prioridade sobre o caminho do servidor:
+ * ela aparece na hora, com ou sem internet. Só cai pro caminho remoto quando
+ * a fazenda veio do servidor e nunca teve foto local nesse celular.
+ */
+const resolveFarmImage = (farm: FarmItem) => getImageUrl(farm.localImageUri ?? farm.imagem ?? null);
 
 const formatAddress = (farm: FarmItem) => {
   const parts = [farm.rua, farm.bairro].filter(Boolean).join(", ");
@@ -46,20 +56,14 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation<any>();
 
-  // Lê o espelho local (SQLite) na hora — funciona com ou sem internet,
-  // e já mostra fazendas cadastradas offline que ainda não sincronizaram.
   const loadFromLocal = () => {
     try {
-      const list = getFazendas();
-      setFarms(list);
+      setFarms(getFazendas());
     } catch (error) {
       console.error("[Home] Erro ao ler fazendas locais:", error);
     }
   };
 
-  // Sincroniza (envia pendências + baixa o que há de novo no servidor)
-  // e só então relê o local pra refletir o resultado. Sem internet,
-  // runSync() simplesmente não faz nada e a tela continua com o que já tinha.
   const syncAndReload = async () => {
     loadFromLocal();
     setRefreshing(true);
@@ -104,7 +108,7 @@ export default function HomeScreen() {
         }
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <Image source={getImageUrl(item.imagem)} style={styles.cardImage} />
+            <Image source={resolveFarmImage(item)} style={styles.cardImage} />
             <View style={styles.cardContent}>
               <Text style={styles.cardTitle}>{item.nome_fazenda}</Text>
               <Text style={styles.cardText}>{formatAddress(item)}</Text>

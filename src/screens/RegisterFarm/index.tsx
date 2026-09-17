@@ -32,7 +32,15 @@ export default function RegisterFarm() {
       allowsEditing: true,
     });
     if (!result.canceled) {
-      setFoto(result.assets[0].uri);
+      // Já copia pro diretório permanente do app na hora da escolha: a uri do
+      // ImagePicker é de cache e pode sumir antes da sincronização.
+      const asset = result.assets[0];
+      try {
+        const saved = await saveImageLocally(asset.uri, asset.mimeType ?? 'image/jpeg');
+        setFoto(saved.localUri);
+      } catch {
+        setFoto(asset.uri);
+      }
     }
   };
 
@@ -51,10 +59,6 @@ export default function RegisterFarm() {
     setLoading(true);
 
     try {
-      // Copia a foto (se houver) pra um diretório persistente do app.
-      // A uri que vem do ImagePicker é de cache e pode sumir antes de
-      // sincronizarmos — sem isso, uma fazenda cadastrada offline hoje
-      // pode perder a foto quando o outbox tentar enviá-la mais tarde.
       let localImageUri: string | null = null;
       if (foto && Platform.OS !== 'web') {
         try {
@@ -63,8 +67,11 @@ export default function RegisterFarm() {
         } catch {
           localImageUri = foto;
         }
+      } else if (foto) {
+        localImageUri = foto;
       }
 
+      // Isso vai pro servidor (só os campos que a API conhece).
       const fazendaPayload = {
         nome_fazenda: name,
         rua: street,
@@ -74,14 +81,18 @@ export default function RegisterFarm() {
         numero: numeroInt,
       };
 
-      // 1) Gera um id local e grava na SQLite na hora — a fazenda já existe
-      //    pro resto do app (Farm, Herd, seleção de fazenda) mesmo sem rede.
+      // Isso fica salvo no celular. A DIFERENÇA em relação à versão anterior:
+      // a foto entra no registro local (imagem + localImageUri). Antes só o
+      // payload era gravado, sem imagem nenhuma — por isso a Home mostrava a
+      // imagem padrão do app até o celular pegar internet.
       const localId = generateLocalId('fazenda');
-      saveFazendaLocally(fazendaPayload, localId);
+      const registroLocal = {
+        ...fazendaPayload,
+        imagem: localImageUri,
+        localImageUri,
+      };
+      saveFazendaLocally(registroLocal, localId);
 
-      // 2) Enfileira a operação real (POST /fazendas) pro outbox. Quando
-      //    sincronizar, o id local vira o id_fazenda definitivo do servidor
-      //    (replaceLocalFazendaId, já existente no repository).
       enqueueOperation({
         entity: 'fazenda',
         localId,
@@ -92,14 +103,12 @@ export default function RegisterFarm() {
         imageField: 'imagem',
       });
 
-      // 3) Tenta sincronizar imediatamente em segundo plano. Se não houver
-      //    internet, runSync simplesmente não faz nada e a fila fica pra
-      //    depois — não bloqueia a navegação do usuário.
+      // Tenta sincronizar em segundo plano. Offline, não faz nada e a fila
+      // fica pra depois — sem travar a navegação e sem avisar nada ao usuário.
       runSync();
 
-      const localFarm = { ...fazendaPayload, id_fazenda: localId, imagem: localImageUri ?? null };
+      const localFarm = { ...registroLocal, id_fazenda: localId };
 
-      Alert.alert('Sucesso', 'Fazenda cadastrada! Será sincronizada automaticamente quando houver internet.');
       navigation.navigate('Farm', { farm: localFarm });
     } catch (error: any) {
       Alert.alert('Erro', error?.message || 'Erro ao cadastrar');

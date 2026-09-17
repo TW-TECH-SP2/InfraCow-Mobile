@@ -14,7 +14,7 @@ import Navbar from "../../components/Navbar";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import React, { useCallback, useMemo, useState } from "react";
 import { useFocusEffect } from '@react-navigation/native';
-import { getFazendas, getAnimaisByFazenda, getAllAnimais, deleteAnimalLocally } from "../../storage/repository";
+import { getFazendaById, getAnimaisByFazenda, getAllAnimais, deleteAnimalLocally, resolveId } from "../../storage/repository";
 import { enqueueOperation } from "../../storage/outbox";
 import { runSync } from "../../services/syncManager";
 import Constants from "expo-constants";
@@ -73,18 +73,23 @@ export default function HerdScreen() {
 
   const farmFromRoute = route.params?.farm ?? null;
   const farmIdValue = farmFromRoute?.id_fazenda ?? farmFromRoute?.id ?? null;
-  const farmId = farmIdValue !== null && farmIdValue !== undefined && String(farmIdValue).trim() !== ''
-    ? String(farmIdValue)
-    : '';
+
+  // resolveId traduz um id local que já virou id definitivo do servidor.
+  // Sem isso, esta tela aberta logo após o cadastro da fazenda ficava com um
+  // id antigo e não encontrava mais nem a fazenda nem os animais dela.
+  const farmId = resolveId(farmIdValue);
 
   // Lê fazenda + animais direto do SQLite local — funciona offline e
   // já mostra animais cadastrados em campo que ainda não sincronizaram.
   const loadFromLocal = useCallback(() => {
     try {
-      const farms = getFazendas();
-      const displayFarm = farmId ? farms.find((f: any) => String(f.id_fazenda ?? f.id ?? '') === farmId) ?? farmFromRoute : farmFromRoute;
+      // Relê a fazenda do banco local: assim o nome e a FOTO ficam sempre
+      // atualizados (inclusive a foto escolhida no cadastro offline).
+      const displayFarm = getFazendaById(farmId) ?? farmFromRoute;
       setHeaderFarm(displayFarm);
-      setHeaderImageSource(resolveImage(displayFarm?.imagem ?? null, DEFAULT_FARM_IMAGE));
+      setHeaderImageSource(
+        resolveImage(displayFarm?.localImageUri ?? displayFarm?.imagem ?? null, DEFAULT_FARM_IMAGE)
+      );
 
       const filtered = farmId ? getAnimaisByFazenda(farmId) : getAllAnimais();
       console.log('[Herd] farmId:', farmId, '| animais locais:', filtered.length);

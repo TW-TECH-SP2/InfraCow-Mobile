@@ -13,6 +13,8 @@ import {
   replaceLocalAnimalId,
   replaceLocalFazendaId,
   replaceLocalMedicaoId,
+  resolveId,
+  resolveIdsInPayload,
 } from "../storage/repository";
 
 const MAX_ATTEMPTS = 5;
@@ -20,70 +22,100 @@ const MAX_ATTEMPTS = 5;
 let syncing = false;
 let listenerStarted = false;
 
-/** Monta o corpo da requisição: FormData se a operação tiver uma imagem local, senão JSON puro. */
-async function buildRequestBody(op: OutboxOperation) {
-  const payload = JSON.parse(op.payload_json);
+/**
+ * A API do Infracow recebe fazenda e animal via multipart (multer), porque
+ * essas rotas aceitam upload de imagem. Mandar JSON puro nelas fazia o
+ * servidor responder erro e a operação era descartada depois de algumas
+ * tentativas — era por isso que o animal nunca chegava na nuvem.
+ * Medições não têm imagem e continuam em JSON.
+ */
+const usesMultipart = (op: OutboxOperation) =>
+  (op.entity === "fazenda" || op.entity === "animal") && op.method !== "delete";
 
-  if (!op.local_image_uri) {
-    return payload;
-  }
+/** Monta o corpo da requisição: FormData pra fazenda/animal, JSON pro resto. */
+function buildRequestBody(op: OutboxOperation) {
+  // Traduz ids locais que já viraram ids do servidor (ex: o animal foi criado
+  // apontando pra "local_fazenda_123" e a fazenda já sincronizou como "57").
+  const payload = resolveIdsInPayload(JSON.parse(op.payload_json));
+
+  if (op.method === "delete") return undefined;
+
+  if (!usesMultipart(op)) return payload;
 
   const form = new FormData();
   Object.entries(payload).forEach(([key, value]) => {
+    if (value === null || value === undefined) return;
     form.append(key, String(value));
   });
 
-  const filename = op.local_image_uri.split("/").pop() || "photo.jpg";
-  const ext = filename.match(/\.(\w+)$/)?.[1] ?? "jpg";
-  form.append(op.image_field ?? "imagem", {
-    uri: op.local_image_uri,
-    name: filename,
-    type: `image/${ext}`,
-  } as any);
+  if (op.local_image_uri) {
+    const filename = op.local_image_uri.split("/").pop() || "photo.jpg";
+    const ext = filename.match(/\.(\w+)$/)?.[1] ?? "jpg";
+    form.append(op.image_field ?? "imagem", {
+      uri: op.local_image_uri,
+      name: filename,
+      type: `image/${ext.toLowerCase() === "jpg" ? "jpeg" : ext}`,
+    } as any);
+  }
 
   return form;
 }
 
+/** Endpoints como /animais/local_animal_123 precisam do id real antes de sair. */
+function resolveEndpoint(endpoint: string) {
+  return endpoint.replace(/local_[A-Za-z]+_\d+_[a-z0-9]+/g, (match) => resolveId(match) || match);
+}
+
+/** Lê o id criado pelo servidor aceitando os formatos possíveis de resposta. */
+function extractServerId(data: any, entityKey: string, idKey: string): string | null {
+  const candidates = [
+    data?.[entityKey]?.[idKey],
+    data?.[entityKey]?.id,
+    data?.[idKey],
+    data?.id,
+    data?.data?.[entityKey]?.[idKey],
+    data?.data?.[idKey],
+  ];
+  for (const value of candidates) {
+    if (value !== null && value !== undefined && String(value).trim() !== "") return String(value);
+  }
+  return null;
+}
+
 /** Processa a fila de operações pendentes, em ordem, uma por vez. */
 async function drainOutbox() {
-  // Loop com "pegue a próxima pendente" (em vez de carregar a lista inteira uma
-  // única vez) porque processar uma operação pode reescrever o payload_json de
-  // outra que ainda está na fila (ex: fazenda sincroniza e atualiza o id_fazenda
-  // dentro do payload do animal que está logo atrás dela). Reler do banco a cada
-  // volta garante que a gente sempre envie o payload mais atual.
-  while (true) {
+  // Reler do banco a cada volta: processar uma operação pode reescrever o
+  // payload de outra que ainda está na fila (a fazenda sincroniza e o animal
+  // logo atrás dela passa a ter o id_fazenda definitivo).
+  let guard = 0;
+  while (guard++ < 200) {
     const pending = getPendingOperations();
     const op = pending[0];
     if (!op) break;
 
     try {
-      const data = await buildRequestBody(op);
+      const data = buildRequestBody(op);
       const response = await api.request({
         method: op.method,
-        url: op.endpoint,
+        url: resolveEndpoint(op.endpoint),
         data,
+        headers: usesMultipart(op) ? { "Content-Type": "multipart/form-data" } : undefined,
         // @ts-ignore — campo custom lido pelo interceptor em api.ts
         silentNetworkError: true,
       });
 
-      // Se criamos um registro novo (POST) que tinha um id local temporário,
-      // troca pelo id definitivo que o servidor acabou de gerar. Os ids vêm
-      // aninhados na resposta (confirmado nos controllers da API):
-      // POST /animais   -> { animal: { id_animal } }
-      // POST /fazendas  -> { fazenda: { id_fazenda } }
-      // POST /medicoes  -> { medicao: { id_medicao } }
       if (op.method === "post" && op.local_id.startsWith("local_")) {
         if (op.entity === "animal") {
-          const serverId = response.data?.animal?.id_animal;
-          if (serverId) replaceLocalAnimalId(op.local_id, String(serverId));
+          const serverId = extractServerId(response.data, "animal", "id_animal");
+          if (serverId) replaceLocalAnimalId(op.local_id, serverId);
         }
         if (op.entity === "fazenda") {
-          const serverId = response.data?.fazenda?.id_fazenda;
-          if (serverId) replaceLocalFazendaId(op.local_id, String(serverId));
+          const serverId = extractServerId(response.data, "fazenda", "id_fazenda");
+          if (serverId) replaceLocalFazendaId(op.local_id, serverId);
         }
         if (op.entity === "medicao") {
-          const serverId = response.data?.medicao?.id_medicao;
-          if (serverId) replaceLocalMedicaoId(op.local_id, String(serverId));
+          const serverId = extractServerId(response.data, "medicao", "id_medicao");
+          if (serverId) replaceLocalMedicaoId(op.local_id, serverId);
         }
       }
 
@@ -93,28 +125,32 @@ async function drainOutbox() {
 
       if (isNetworkError) {
         // Sem conexão de verdade (ou servidor fora do ar): para por aqui e
-        // tenta de novo na próxima vez que a conexão voltar, preservando a ordem.
+        // tenta de novo quando a conexão voltar, preservando a ordem da fila.
         break;
       }
 
-      // O servidor respondeu com erro (ex: dado inválido). Não adianta insistir
-      // pra sempre — conta a tentativa e, depois de algumas, desiste dessa operação
-      // pra não travar a fila inteira.
+      console.warn(
+        "[sync] falha ao enviar",
+        op.entity,
+        op.method,
+        op.endpoint,
+        error?.response?.status,
+        JSON.stringify(error?.response?.data ?? {})
+      );
+
       incrementAttempts(op.id);
       if (op.attempts + 1 >= MAX_ATTEMPTS) {
-        console.warn("[sync] descartando operação após falhas repetidas:", op.endpoint, error?.response?.data);
+        console.warn("[sync] descartando operação após falhas repetidas:", op.endpoint);
         removeOperation(op.id);
+      } else {
+        // Não descartou ainda: sai do loop pra não ficar martelando o servidor
+        // agora. A próxima sincronização tenta de novo.
+        break;
       }
     }
   }
 }
 
-/**
- * Busca uma lista da API e já normaliza os dois formatos possíveis de resposta:
- * um array vazio quando não há nada, OU um 404 (a API responde assim quando a
- * lista está vazia, ex: "Nenhuma Fazenda Encontrada Para Esse Usuario") — nos
- * dois casos o resultado pra gente é o mesmo: lista vazia, não é erro de verdade.
- */
 async function fetchListSafe(endpoint: string, key: string): Promise<any[]> {
   try {
     // @ts-ignore — campo custom lido pelo interceptor em api.ts
@@ -125,15 +161,10 @@ async function fetchListSafe(endpoint: string, key: string): Promise<any[]> {
     return [];
   } catch (error: any) {
     if (error?.response?.status === 404) return [];
-    throw error; // erro de verdade (sem rede, 401, 500...) sobe pra quem chamou tratar
+    throw error;
   }
 }
 
-/**
- * Baixa o estado atual do servidor e atualiza o espelho local. As três chamadas
- * são independentes (Promise.allSettled): se uma falhar (ex: sem internet no meio
- * do download), as outras duas que deram certo ainda atualizam o cache local.
- */
 async function pullFromServer() {
   const [fazendasResult, animaisResult, medicoesResult] = await Promise.allSettled([
     fetchListSafe("/fazendas", "fazendas"),
@@ -146,16 +177,20 @@ async function pullFromServer() {
   if (medicoesResult.status === "fulfilled") upsertMedicoes(medicoesResult.value);
 }
 
-/** Ponto único de sincronização: primeiro envia o que está pendente, depois atualiza o cache local. */
+/** Ponto único de sincronização: envia o pendente, depois atualiza o cache local. */
 export async function runSync() {
   if (syncing) return;
   syncing = true;
   try {
     const net = await NetInfo.fetch();
-    if (!net.isConnected) return;
+    // isInternetReachable pode vir null em alguns aparelhos — só consideramos
+    // "sem internet" quando for explicitamente false.
+    if (!net.isConnected || net.isInternetReachable === false) return;
 
     await drainOutbox();
     await pullFromServer();
+  } catch (e) {
+    console.warn("[sync] erro na sincronização:", e);
   } finally {
     syncing = false;
   }
@@ -167,7 +202,7 @@ export function startSyncListener() {
   listenerStarted = true;
 
   NetInfo.addEventListener((state) => {
-    if (state.isConnected) {
+    if (state.isConnected && state.isInternetReachable !== false) {
       runSync();
     }
   });
