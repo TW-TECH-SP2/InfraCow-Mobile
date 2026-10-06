@@ -4,13 +4,65 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
+  ImageSourcePropType,
 } from "react-native";
 import styles from "./styles";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useEffect, useState } from "react";
+import Constants from "expo-constants";
 import { getAnimalById, getMedicoesByAnimal } from "../../storage/repository";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+
+const DEFAULT_ANIMAL_IMAGE = require("../../../assets/cow1.png");
+
+const getApiBaseUrl = () => {
+  const expoConfig: any = (Constants as any).expoConfig ?? (Constants as any).manifest;
+  return expoConfig?.extra?.API_URL ?? "https://infracow-api-hv24.onrender.com";
+};
+
+const resolveAnimalImageUri = (image?: string | null): string | null => {
+  const normalized = String(image ?? "").trim();
+  if (!normalized || normalized.toLowerCase() === "null" || normalized.toLowerCase() === "undefined") {
+    return null;
+  }
+  if (/^https?:\/\//i.test(normalized) || /^(file:|blob:|data:)/i.test(normalized)) {
+    return normalized;
+  }
+  const clean = normalized.replace(/^\/+/, "").replace(/\\/g, "/");
+  const path = clean.startsWith("uploads/") ? clean : `uploads/${clean}`;
+  return `${getApiBaseUrl().replace(/\/$/, "")}/${path}`;
+};
+
+const resolveAnimalImage = (image?: string | null): ImageSourcePropType => {
+  const uri = resolveAnimalImageUri(image);
+  return uri ? { uri } : DEFAULT_ANIMAL_IMAGE;
+};
+
+const SUGESTOES: Record<string, { message: string; risks: string[] }> = {
+  Hipotermia: {
+    message: "Apresentou HIPOTERMIA na medição mais recente! Procure um veterinário!",
+    risks: [
+      "Hipotermia",
+      "Diminuição de apetite",
+      "Redução da produção",
+      "Risco de infecções e choque em casos severos",
+    ],
+  },
+  Febre: {
+    message: "Apresentou hipertermia (febre) na medição mais recente! Procure um veterinário!",
+    risks: [
+      "Hipertermia / Febre",
+      "Desidratação",
+      "Estresse térmico",
+      "Risco de morte em casos severos",
+    ],
+  },
+  Normal: {
+    message: "Apresentou temperatura normal na medição mais recente.",
+    risks: [],
+  },
+};
 
 const DATE_FORMAT = (iso?: string) => {
   if (!iso) return "-";
@@ -52,8 +104,7 @@ export default function ReportAnimal() {
           return;
         }
 
-        // Prioriza a cópia mais atual salva no SQLite; cai pro que veio
-        // por navigation.params se por algum motivo não achar local.
+     
         const animalInfo = getAnimalById(String(animalId)) ?? animalParam;
         if (animalInfo) {
           setAnimalName(animalInfo.nome_animal ?? 'Animal');
@@ -83,6 +134,10 @@ export default function ReportAnimal() {
     load();
   }, [route.params]);
 
+  const animalImageUri = resolveAnimalImageUri(animalData?.localImageUri ?? animalData?.imagem ?? animalData?.image);
+  const latestTemp = history[0]?.temp ?? null;
+  const suggestion = latestTemp != null ? SUGESTOES[getStatus(latestTemp)] : null;
+
   const generateHTML = () => {
     const rows = history
       .map((item) => `
@@ -98,6 +153,8 @@ export default function ReportAnimal() {
         <body style="font-family: Arial; padding: 20px;">
           <h1>Relatório de bovino: ${animalName}</h1>
 
+          ${animalImageUri ? `<img src="${animalImageUri}" width="160" style="border-radius: 8px; margin-bottom: 12px;" />` : ''}
+
           <h3>Dados do animal</h3>
           <p><strong>Raça:</strong> ${animalData?.raca ?? '-'}</p>
           <p><strong>Gênero:</strong> ${animalData?.genero ?? '-'}</p>
@@ -105,6 +162,17 @@ export default function ReportAnimal() {
           <p><strong>Peso:</strong> ${animalData?.peso ?? '-'} kg</p>
           <p><strong>Idade:</strong> ${animalData?.idade ?? '-'} anos</p>
           ${animalData?.codigo ? `<p><strong>Código:</strong> ${animalData.codigo}</p>` : ''}
+
+          ${suggestion ? `
+          <h3>Sugestão</h3>
+          <p>${suggestion.message}</p>
+          ${suggestion.risks.length > 0 ? `
+          <p><strong>Riscos possíveis:</strong></p>
+          <ul>
+            ${suggestion.risks.map((r) => `<li>${r}</li>`).join("")}
+          </ul>
+          ` : ''}
+          ` : ''}
 
           <h3>Histórico de medições</h3>
           <table border="1" cellspacing="0" cellpadding="8" width="100%">
@@ -149,6 +217,13 @@ export default function ReportAnimal() {
         {error && <Text style={[styles.label, { color: 'red' }]}>{error}</Text>}
 
         {animalData && (
+          <Image
+            source={resolveAnimalImage(animalData?.localImageUri ?? animalData?.imagem ?? animalData?.image)}
+            style={{ width: 140, height: 140, borderRadius: 12, alignSelf: 'center', marginBottom: 16 }}
+          />
+        )}
+
+        {animalData && (
           <View style={styles.summary}>
             <View style={styles.row}>
               <Text style={styles.label}>Raça</Text>
@@ -174,6 +249,21 @@ export default function ReportAnimal() {
               <View style={styles.row}>
                 <Text style={styles.label}>Código</Text>
                 <Text style={styles.value}>{animalData.codigo}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {suggestion && (
+          <View style={[styles.table, { padding: 16, marginBottom: 20 }]}>
+            <Text style={{ fontWeight: '700', fontSize: 15, marginBottom: 6, color: '#222' }}>Sugestão</Text>
+            <Text style={{ fontSize: 14, color: '#494949' }}>{suggestion.message}</Text>
+            {suggestion.risks.length > 0 && (
+              <View style={{ marginTop: 10 }}>
+                <Text style={{ fontWeight: '600', fontSize: 13, marginBottom: 4, color: '#222' }}>Riscos possíveis:</Text>
+                {suggestion.risks.map((risk, index) => (
+                  <Text key={index} style={{ fontSize: 13, color: '#494949', marginBottom: 2 }}>- {risk}</Text>
+                ))}
               </View>
             )}
           </View>
