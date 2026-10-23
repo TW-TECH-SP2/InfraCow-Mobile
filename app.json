@@ -1,5 +1,8 @@
 {
   "expo": {
+    "name": "InfraCow",
+    "slug": "infracow-mobile",
+    "icon": "./assets/icon.png",
     "extra": {
       "API_URL": "https://infracow-api-hv24.onrender.com",
       "eas": {
