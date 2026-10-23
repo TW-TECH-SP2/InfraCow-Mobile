@@ -5,10 +5,11 @@ import React from "react";
 import styles from "./styles";
 import Navbar from "../../components/Navbar";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
-import api from "../../services/api";
+import { getFazendas } from "../../storage/repository";
+import { runSync } from "../../services/syncManager";
 
 type FarmItem = {
-  id_fazenda: number;
+  id_fazenda: number | string;
   nome_fazenda: string;
   rua?: string | null;
   bairro?: string | null;
@@ -16,6 +17,7 @@ type FarmItem = {
   CEP?: string | null;
   numero?: string | number | null;
   imagem?: string | null;
+  localImageUri?: string | null;
 };
 
 const FALLBACK_IMAGE = require("../../../assets/farm1.png");
@@ -23,11 +25,24 @@ const API_URL = "https://infracow-api-hv24.onrender.com";
 
 const getImageUrl = (imagePath?: string | null) => {
   if (!imagePath) return FALLBACK_IMAGE;
-  if (imagePath.startsWith("http")) return { uri: imagePath };
-  const cleanPath = imagePath.replace(/^\/+/, "");
+  const normalized = String(imagePath).trim();
+  if (!normalized || normalized === "null" || normalized === "undefined") return FALLBACK_IMAGE;
+  // file:/blob:/data: = imagem salva no próprio celular (cadastro offline ou
+  // já sincronizado). http(s) = veio do servidor.
+  if (/^https?:\/\//i.test(normalized) || /^(file:|blob:|data:)/i.test(normalized)) {
+    return { uri: normalized };
+  }
+  const cleanPath = normalized.replace(/^\/+/, "");
   const fullPath = cleanPath.startsWith("uploads/") ? cleanPath : `uploads/${cleanPath}`;
   return { uri: `${API_URL}/${fullPath}` };
 };
+
+/**
+ * A foto guardada no aparelho tem prioridade sobre o caminho do servidor:
+ * ela aparece na hora, com ou sem internet. Só cai pro caminho remoto quando
+ * a fazenda veio do servidor e nunca teve foto local nesse celular.
+ */
+const resolveFarmImage = (farm: FarmItem) => getImageUrl(farm.localImageUri ?? farm.imagem ?? null);
 
 const formatAddress = (farm: FarmItem) => {
   const parts = [farm.rua, farm.bairro].filter(Boolean).join(", ");
@@ -38,23 +53,33 @@ const formatAddress = (farm: FarmItem) => {
 
 export default function HomeScreen() {
   const [farms, setFarms] = useState<FarmItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation<any>();
 
-  const loadFarms = async () => {
+  const loadFromLocal = () => {
     try {
-      const response = await api.get("/fazendas");
-      const list = response.data?.fazendas || response.data || [];
-      console.log("[Home] API retornou:", list.length, "fazendas");
-      setFarms(list);
+      setFarms(getFazendas());
     } catch (error) {
-      console.error("[Home] Erro ao carregar fazendas:", error);
-      setFarms([]);
+      console.error("[Home] Erro ao ler fazendas locais:", error);
+    }
+  };
+
+  const syncAndReload = async () => {
+    loadFromLocal();
+    setRefreshing(true);
+    try {
+      await runSync();
+    } catch (error) {
+      console.error("[Home] Erro ao sincronizar:", error);
+    } finally {
+      loadFromLocal();
+      setRefreshing(false);
     }
   };
 
   useFocusEffect(
     React.useCallback(() => {
-      loadFarms();
+      syncAndReload();
     }, [])
   );
 
@@ -74,8 +99,8 @@ export default function HomeScreen() {
         data={farms}
         keyExtractor={(item) => String(item.id_fazenda)}
         contentContainerStyle={{ paddingBottom: 100 }}
-        onRefresh={loadFarms}
-        refreshing={false}
+        onRefresh={syncAndReload}
+        refreshing={refreshing}
         ListEmptyComponent={
           <View style={{ paddingVertical: 28, alignItems: "center" }}>
             <Text style={styles.cardText}>Você ainda não cadastrou fazendas.</Text>
@@ -83,7 +108,7 @@ export default function HomeScreen() {
         }
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <Image source={getImageUrl(item.imagem)} style={styles.cardImage} />
+            <Image source={resolveFarmImage(item)} style={styles.cardImage} />
             <View style={styles.cardContent}>
               <Text style={styles.cardTitle}>{item.nome_fazenda}</Text>
               <Text style={styles.cardText}>{formatAddress(item)}</Text>

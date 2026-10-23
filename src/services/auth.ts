@@ -2,6 +2,7 @@ import api from './api';
 import { deleteImageLocally } from './imageStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { clearLocalData } from '../storage/repository';
 
 const SESSION_STORAGE_KEY = '@infracow_kv:session:active';
 const TOKEN_KEY = '@infracow_token';
@@ -170,12 +171,18 @@ const signUp = async (data: any) => {
   return res.data;
 };
 
+
 const signOut = async () => {
   await AsyncStorage.removeItem(TOKEN_KEY);
   try {
     await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
   } catch (e) {
     console.warn('Error clearing session', e);
+  }
+  try {
+    clearLocalData();
+  } catch (e) {
+    console.warn('Error clearing local database', e);
   }
   delete api.defaults.headers.common['Authorization'];
 };

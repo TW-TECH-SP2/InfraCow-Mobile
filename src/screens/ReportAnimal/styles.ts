@@ -43,6 +43,13 @@ export default StyleSheet.create({
     padding: 10,
   },
 
+  summary: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    padding: 10,
+    marginBottom: 20,
+  },
+
   row: {
   flexDirection: "row",
   justifyContent: "space-between",

@@ -30,7 +30,12 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const isNetworkError = !error.response && error.message === 'Network Error';
-    if (isNetworkError) {
+    // Chamadas feitas pelo syncManager em segundo plano marcam
+    // `silentNetworkError: true` na config — elas tentam de novo sozinhas
+    // quando a conexão voltar, então não faz sentido interromper o usuário
+    // com um alerta toda vez que o app tentar sincronizar sem sinal.
+    const isSilent = (error.config as any)?.silentNetworkError === true;
+    if (isNetworkError && !isSilent) {
       Alert.alert(
         'Sem conexão',
         'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.',

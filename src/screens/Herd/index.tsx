@@ -6,6 +6,7 @@ import {
   ScrollView,
   TextInput,
   ImageSourcePropType,
+  Alert,
 } from "react-native";
 import Text from "../../components/Text";
 import styles from "./styles";
@@ -13,7 +14,9 @@ import Navbar from "../../components/Navbar";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import React, { useCallback, useMemo, useState } from "react";
 import { useFocusEffect } from '@react-navigation/native';
-import api from "../../services/api";
+import { getFazendaById, getAnimaisByFazenda, getAllAnimais, deleteAnimalLocally, resolveId } from "../../storage/repository";
+import { enqueueOperation } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 import Constants from "expo-constants";
 
 const DEFAULT_FARM_IMAGE = require("../../../assets/farm1.png");
@@ -70,45 +73,76 @@ export default function HerdScreen() {
 
   const farmFromRoute = route.params?.farm ?? null;
   const farmIdValue = farmFromRoute?.id_fazenda ?? farmFromRoute?.id ?? null;
-  const farmId = farmIdValue !== null && farmIdValue !== undefined && String(farmIdValue).trim() !== ''
-    ? String(farmIdValue)
-    : '';
 
-  const loadAnimals = useCallback(async () => {
-    setLoadingAnimals(true);
+  // resolveId traduz um id local que já virou id definitivo do servidor.
+  // Sem isso, esta tela aberta logo após o cadastro da fazenda ficava com um
+  // id antigo e não encontrava mais nem a fazenda nem os animais dela.
+  const farmId = resolveId(farmIdValue);
+
+  // Lê fazenda + animais direto do SQLite local — funciona offline e
+  // já mostra animais cadastrados em campo que ainda não sincronizaram.
+  const loadFromLocal = useCallback(() => {
     try {
-      const farmsResp = await api.get('/fazendas');
-      const farms = Array.isArray(farmsResp.data) ? farmsResp.data : Array.isArray(farmsResp.data?.fazendas) ? farmsResp.data.fazendas : [];
-      const displayFarm = farmId ? farms.find((f: any) => String(f.id_fazenda ?? f.id ?? '') === farmId) ?? farmFromRoute : farmFromRoute;
+      // Relê a fazenda do banco local: assim o nome e a FOTO ficam sempre
+      // atualizados (inclusive a foto escolhida no cadastro offline).
+      const displayFarm = getFazendaById(farmId) ?? farmFromRoute;
       setHeaderFarm(displayFarm);
-      setHeaderImageSource(resolveImage(displayFarm?.imagem ?? null, DEFAULT_FARM_IMAGE));
+      setHeaderImageSource(
+        resolveImage(displayFarm?.localImageUri ?? displayFarm?.imagem ?? null, DEFAULT_FARM_IMAGE)
+      );
 
-      const animalsResp = await api.get('/animais');
-      const allAnimals = Array.isArray(animalsResp.data) ? animalsResp.data : Array.isArray(animalsResp.data?.animais) ? animalsResp.data.animais : [];
-      const filtered = farmId
-        ? allAnimals.filter((a: any) => String(a.id_fazenda ?? a.fazenda_id ?? '') === farmId)
-        : allAnimals;
-
-      console.log('[Herd] farmId:', farmId, '| animais encontrados:', filtered.length);
+      const filtered = farmId ? getAnimaisByFazenda(farmId) : getAllAnimais();
+      console.log('[Herd] farmId:', farmId, '| animais locais:', filtered.length);
       setAnimals(filtered);
     } catch (err) {
-      console.error('[Herd] Erro ao carregar:', err);
+      console.error('[Herd] Erro ao ler dados locais:', err);
+    }
+  }, [farmId, farmFromRoute]);
+
+  // Mostra o que já está salvo local na hora, sincroniza em paralelo, e
+  // relê quando terminar. Sem internet, fica só no que já tinha local.
+  const loadAnimals = useCallback(async () => {
+    setLoadingAnimals(true);
+    loadFromLocal();
+    try {
+      await runSync();
+    } catch (err) {
+      console.error('[Herd] Erro ao sincronizar:', err);
     } finally {
+      loadFromLocal();
       setLoadingAnimals(false);
     }
-  }, [farmId]);
+  }, [loadFromLocal]);
 
   const deleteAnimal = useCallback(async (animal: any) => {
     const animalId = String(animal?.id_animal ?? animal?.id ?? '');
     if (!animalId) return;
+    const isLocalOnly = animalId.startsWith('local_');
 
     try {
       setDeletingAnimalId(animalId);
       setAnimals((prev) => prev.filter((a) => String(a.id_animal ?? a.id) !== animalId));
-      await api.delete(`/animais/${animalId}`);
+
+      // Remove local na hora — animal, medições e notificações dele, e
+      // cancela qualquer operação pendente no outbox.
+      deleteAnimalLocally(animalId);
+
+      if (!isLocalOnly) {
+        // Só existe no servidor se não for um id local que nunca sincronizou.
+        enqueueOperation({
+          entity: 'animal',
+          localId: animalId,
+          method: 'delete',
+          endpoint: `/animais/${animalId}`,
+          payload: {},
+        });
+        runSync().catch((err) => console.error('[Herd] Erro ao sincronizar exclusão:', err));
+      }
+
       setOpenMenuId(null);
-    } catch (err) {
-      console.warn('[Herd] delete animal error:', err);
+    } catch (err: any) {
+      console.error('[Herd] delete animal error:', err);
+      Alert.alert('Erro', 'Não foi possível deletar o animal.');
       loadAnimals();
     } finally {
       setDeletingAnimalId(null);

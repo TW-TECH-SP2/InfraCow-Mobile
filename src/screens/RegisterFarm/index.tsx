@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useNavigation } from "@react-navigation/native";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
-import api from "../../services/api";
+import { saveImageLocally } from "../../services/imageStorage";
+import { generateLocalId, saveFazendaLocally } from "../../storage/repository";
+import { enqueueOperation } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 export default function RegisterFarm() {
   const navigation = useNavigation<any>();
@@ -29,7 +32,15 @@ export default function RegisterFarm() {
       allowsEditing: true,
     });
     if (!result.canceled) {
-      setFoto(result.assets[0].uri);
+      // Já copia pro diretório permanente do app na hora da escolha: a uri do
+      // ImagePicker é de cache e pode sumir antes da sincronização.
+      const asset = result.assets[0];
+      try {
+        const saved = await saveImageLocally(asset.uri, asset.mimeType ?? 'image/jpeg');
+        setFoto(saved.localUri);
+      } catch {
+        setFoto(asset.uri);
+      }
     }
   };
 
@@ -48,37 +59,59 @@ export default function RegisterFarm() {
     setLoading(true);
 
     try {
-      const formData = new FormData();
-      formData.append('nome_fazenda', name);
-      formData.append('rua', street);
-      formData.append('bairro', neighborhood);
-      formData.append('cidade', city);
-      formData.append('CEP', cep);
-      formData.append('numero', String(numeroInt));
-
+      let localImageUri: string | null = null;
       if (foto && Platform.OS !== 'web') {
-        const filename = foto.split('/').pop() || 'photo.jpg';
-        const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : 'image/jpeg';
-        (formData as any).append('imagem', {
-          uri: foto,
-          name: filename,
-          type: type,
-        });
+        try {
+          const savedImage = await saveImageLocally(foto, 'image/jpeg');
+          localImageUri = savedImage.localUri;
+        } catch {
+          localImageUri = foto;
+        }
+      } else if (foto) {
+        localImageUri = foto;
       }
 
-      const response = await api.post('/fazendas', formData);
-      const createdFarm = response.data?.fazenda ?? response.data;
-      
-      if (createdFarm?.id_fazenda) {
-        Alert.alert('Sucesso', 'Fazenda cadastrada!');
-        navigation.navigate('Farm', { farm: createdFarm });
-      } else {
-        throw new Error('ID não retornado');
-      }
-      
+      // Isso vai pro servidor (só os campos que a API conhece).
+      const fazendaPayload = {
+        nome_fazenda: name,
+        rua: street,
+        bairro: neighborhood,
+        cidade: city,
+        CEP: cep,
+        numero: numeroInt,
+      };
+
+      // Isso fica salvo no celular. A DIFERENÇA em relação à versão anterior:
+      // a foto entra no registro local (imagem + localImageUri). Antes só o
+      // payload era gravado, sem imagem nenhuma — por isso a Home mostrava a
+      // imagem padrão do app até o celular pegar internet.
+      const localId = generateLocalId('fazenda');
+      const registroLocal = {
+        ...fazendaPayload,
+        imagem: localImageUri,
+        localImageUri,
+      };
+      saveFazendaLocally(registroLocal, localId);
+
+      enqueueOperation({
+        entity: 'fazenda',
+        localId,
+        method: 'post',
+        endpoint: '/fazendas',
+        payload: fazendaPayload,
+        localImageUri,
+        imageField: 'imagem',
+      });
+
+      // Tenta sincronizar em segundo plano. Offline, não faz nada e a fila
+      // fica pra depois — sem travar a navegação e sem avisar nada ao usuário.
+      runSync();
+
+      const localFarm = { ...registroLocal, id_fazenda: localId };
+
+      navigation.navigate('Farm', { farm: localFarm });
     } catch (error: any) {
-      Alert.alert('Erro', error?.response?.data?.message || error?.message || 'Erro ao cadastrar');
+      Alert.alert('Erro', error?.message || 'Erro ao cadastrar');
     } finally {
       setLoading(false);
     }
@@ -115,11 +148,11 @@ export default function RegisterFarm() {
             </View>
             <View style={styles.halfField}>
               <Text style={styles.inputLabel}>Número: *</Text>
-              <TextInput 
-                style={styles.input} 
-                placeholder="Ex.: 135" 
-                placeholderTextColor="#D3D3D3" 
-                value={number} 
+              <TextInput
+                style={styles.input}
+                placeholder="Ex.: 135"
+                placeholderTextColor="#D3D3D3"
+                value={number}
                 onChangeText={setNumber}
                 keyboardType="numeric"
               />

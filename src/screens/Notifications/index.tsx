@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Image,
@@ -15,11 +15,12 @@ import {
 } from "react-native-gesture-handler";
 import styles from "./styles";
 import Navbar from "../../components/Navbar";
-import api from "../../services/api";
-import auth from "../../services/auth";
 import Constants from "expo-constants";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { Alert } from "react-native";
+import { getNotifications, deleteNotification, getAnimalById } from "../../storage/repository";
+import { runSync } from "../../services/syncManager";
+import { getTempLevel } from "../../utils/temperatureStatus";
 
 type NotificationItem = {
   id: string;
@@ -47,7 +48,9 @@ const getStatus = (temp?: number | null) => {
     };
   }
 
-  if (val <= 34) {
+  const level = getTempLevel(val);
+
+  if (level === "low") {
     return {
       type: "low",
       message:
@@ -56,7 +59,7 @@ const getStatus = (temp?: number | null) => {
     };
   }
 
-  if (val >= 38.7) {
+  if (level === "high") {
     return {
       type: "high",
       message:
@@ -73,6 +76,18 @@ const getStatus = (temp?: number | null) => {
 };
 
 const DEFAULT_ANIMAL_IMAGE = require("../../../assets/cow1.png");
+
+const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+
+const formatDatetime = (iso?: string | null) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const hora = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const dia = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return `${hora} ${dia} ${DIAS_SEMANA[d.getDay()]}`;
+};
 
 const getApiBaseUrl = () => {
   const expoConfig: any = (Constants as any).expoConfig ?? (Constants as any).manifest;
@@ -116,13 +131,6 @@ const buildImageCandidates = (raw?: string | null): string[] => {
   ];
 };
 
-const extractAnimals = (payload: any): any[] => {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.animais)) return payload.animais;
-  if (Array.isArray(payload?.data)) return payload.data;
-  return [];
-};
-
 export default function NotificationsScreen() {
   const [list, setList] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,43 +138,25 @@ export default function NotificationsScreen() {
   const [selected, setSelected] = useState<NotificationItem | null>(null);
   const navigation = useNavigation<any>();
 
-  const loadNotifications = async () => {
-    const res = await api.get("/notificacoes");
-    let animalsSource: any[] = [];
-    try {
-      const resAnimals = await api.get('/animais');
-      animalsSource = extractAnimals(resAnimals.data);
-    } catch {
-      animalsSource = [];
-    }
 
-    const animalById = new Map(
-      animalsSource.map((a) => [String(a.id_animal ?? a.id), a])
-    );
-
-    return (res.data?.notificacoes || []).map((n: any) => {
-      const temp = n.temperatura ?? n.temp ?? null;
-      const datetime = `${n.hora ?? ""} ${n.dia ?? ""}/${n.mes ?? ""} ${n.dia_semana ?? ""}`.trim();
+  const loadFromLocal = (): NotificationItem[] => {
+    const rows = getNotifications();
+    return rows.map((n: any) => {
+      const temp = n.temp;
       const status = getStatus(Number(temp));
-      const animalFromList = animalById.get(String(n.id_animal));
-      const imgCandidate =
-        animalFromList?.localImageUri ??
-        animalFromList?.imagem ??
-        n.imagem ??
-        n.imagem_animal ??
-        n.animal?.imagem ??
-        n.image ??
-        n.imagemAnimal;
+      const animalFromLocal = n.id_animal ? getAnimalById(String(n.id_animal)) : null;
+      const imgCandidate = animalFromLocal?.localImageUri ?? animalFromLocal?.imagem ?? n.imagem ?? null;
+
       return {
-        id: String(n.id_notificacao),
-        name: n.nome_animal ?? "Animal",
+        id: n.id,
+        name: n.nome_animal ?? animalFromLocal?.nome_animal ?? "Animal",
         image: resolveImage(imgCandidate),
-        imageRaw: imgCandidate ?? null,
+        imageRaw: imgCandidate,
         temperature: temp,
-        datetime,
+        datetime: formatDatetime(n.datahora),
         raw: n,
         status,
-        animalObj: n.animal ?? animalFromList ?? {
+        animalObj: animalFromLocal ?? {
           id_animal: n.id_animal,
           nome_animal: n.nome_animal,
           imagem: n.imagem,
@@ -175,55 +165,42 @@ export default function NotificationsScreen() {
     });
   };
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      try {
-        const items = await loadNotifications();
 
-        if (mounted) setList(items);
-      } catch (e) {
-        console.log("Erro carregando notificações", e);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      const load = async () => {
+        try {
+          if (mounted) setList(loadFromLocal());
+          await runSync();
+        } catch (e) {
+          console.log("Erro sincronizando notificações", e);
+        } finally {
+          if (mounted) {
+            setList(loadFromLocal());
+            setLoading(false);
+          }
+        }
+      };
+      load();
+      return () => {
+        mounted = false;
+      };
+    }, [])
+  );
 
-    load();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const handleRemove = (id: string) => {
 
-  const handleRemove = async (id: string) => {
     try {
-      console.log('[Notifications] Starting delete for id:', id);
-      
-      const deleteUrl = `/notificacoes/${id}`;
-      console.log('[Notifications] DELETE URL:', deleteUrl);
-      
-      await api.delete(deleteUrl);
-      console.log('[Notifications] DELETE successful for id:', id);
-      
+      deleteNotification(id);
       if (selected?.id === id) {
         setModalVisible(false);
         setSelected(null);
       }
-      
-      const refreshed = await loadNotifications();
-      setList(refreshed);
-      
-      Alert.alert('Sucesso', 'Notificação excluída com sucesso.');
-    } catch (error: any) {
-      console.log('[Notifications] Error deleting notification:', error);
-      const errorMsg = error?.response?.data?.message || error?.message || 'Erro desconhecido';
-      console.log('[Notifications] Error details:', {
-        status: error?.response?.status,
-        statusText: error?.response?.statusText,
-        message: errorMsg,
-        url: error?.config?.url,
-      });
-      Alert.alert('Erro', 'Não foi possível excluir a notificação.');
+      setList(loadFromLocal());
+    } catch (error) {
+      console.log("[Notifications] Erro ao excluir notificação local:", error);
+      Alert.alert("Erro", "Não foi possível excluir a notificação.");
     }
   };
 

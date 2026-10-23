@@ -1,11 +1,12 @@
-import { View, TouchableOpacity, Image, ScrollView, ActivityIndicator, Alert } from "react-native";
+import { View, TouchableOpacity, Image, ScrollView, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
-import { useEffect, useRef, useState } from "react";
-import { useNavigation } from "@react-navigation/native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import Navbar from "../../components/Navbar";
 import styles from "./styles";
 import Constants from "expo-constants";
-import api from "../../services/api";
+import { getFazendas } from "../../storage/repository";
+import { runSync } from "../../services/syncManager";
 
 type FarmItem = {
   id_fazenda?: number | string;
@@ -42,21 +43,29 @@ export default function MeasureForm() {
   const navigation = useNavigation<any>();
   const autoRedirectedRef = useRef(false);
 
-  useEffect(() => {
-    const loadFarms = async () => {
-      setLoadingFarms(true);
-      try {
-        const res = await api.get('/fazendas');
-        const list = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.fazendas) ? res.data.fazendas : [];
-        setFarms(list);
-      } catch (error: any) {
-        Alert.alert("Erro", "Não foi possível carregar as fazendas. Verifique sua conexão.");
-      } finally {
-        setLoadingFarms(false);
-      }
-    };
-    loadFarms();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const loadFarms = async () => {
+        setLoadingFarms(true);
+        try {
+          setFarms(getFazendas());
+          await runSync();
+        } catch (err) {
+          console.error('[MeasureForm] Erro ao sincronizar:', err);
+        } finally {
+          if (active) {
+            setFarms(getFazendas());
+            setLoadingFarms(false);
+          }
+        }
+      };
+      loadFarms();
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
 
   useEffect(() => {
     if (loadingFarms || autoRedirectedRef.current) return;

@@ -1,13 +1,15 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, ImageSourcePropType, Alert, Platform, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, ScrollView, ImageSourcePropType, Alert, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
 import { saveImageLocally } from "../../services/imageStorage";
-import api from "../../services/api";
 import Constants from "expo-constants";
 import Navbar from "../../components/Navbar";
+import { updateAnimalLocally } from "../../storage/repository";
+import { enqueueOperation, updatePendingCreatePayload } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 const DEFAULT_ANIMAL_IMAGE = require("../../../assets/cow1.png");
 
@@ -39,8 +41,8 @@ export default function EditAnimal() {
   const route = useRoute<any>();
 
   const animal = route.params?.animal ?? {};
-  const animalId = animal.id_animal ?? animal.id ?? null;
-  const farmId = animal.id_fazenda ?? null;
+  const rawAnimalId = animal.id_animal ?? animal.id ?? null;
+  const animalId = rawAnimalId !== null && rawAnimalId !== undefined && String(rawAnimalId).trim() !== "" ? String(rawAnimalId) : null;
 
   const [foto, setFoto] = useState<string | null>(null);
   const [imageAsset, setImageAsset] = useState<any>(null);
@@ -102,52 +104,58 @@ export default function EditAnimal() {
   };
 
   const handleSave = async () => {
-    if (!animalId || !farmId) {
-      Alert.alert('Erro', 'Animal ou fazenda não encontrados.');
+    if (!animalId) {
+      Alert.alert('Erro', 'Animal não encontrado.');
       return;
     }
 
     setLoading(true);
 
     try {
-      const form = new FormData();
-      if (name) form.append('nome_animal', name);
-      if (codigo) form.append('codigo', codigo);
-      if (genero) form.append('genero', genero);
-      if (tipo) form.append('tipo', tipo);
-      if (raca) form.append('raca', raca);
-      if (peso) form.append('peso', String(peso));
-      if (idade) form.append('idade', String(idade));
+      const patch: Record<string, any> = {};
+      if (name) patch.nome_animal = name;
+      if (codigo) patch.codigo = codigo;
+      if (genero) patch.genero = genero;
+      if (tipo) patch.tipo = tipo;
+      if (raca) patch.raca = raca;
+      if (peso) patch.peso = String(peso);
+      if (idade) patch.idade = String(idade);
+      if (imageAsset?.localUri) patch.localImageUri = imageAsset.localUri;
 
-      if (imageAsset?.uri) {
-        const uri: string = imageAsset.uri;
-        const filename = uri.split('/').pop() || 'photo.jpg';
-        const match = filename.match(/\.(\w+)$/);
-        const ext = match ? match[1] : 'jpg';
-        const type = imageAsset.type ?? `image/${ext}`;
+      // Atualiza o registro local na hora — a edição aparece na tela mesmo
+      // sem internet.
+      updateAnimalLocally(animalId, patch);
 
-        if (Platform.OS === 'web') {
-          try {
-            const resp = await fetch(uri);
-            const blob = await resp.blob();
-            const file = new File([blob], filename, { type: blob.type || type });
-            form.append('imagem', file);
-          } catch (e) {
-            console.warn('Could not convert image uri to blob on web', e);
-          }
-        } else {
-          form.append('imagem', { uri, name: filename, type });
-        }
+      if (animalId.startsWith('local_')) {
+        // Animal ainda não sincronizou: atualiza o payload do POST
+        // pendente em vez de mandar um PUT pra um id que o servidor nem
+        // conhece ainda.
+        updatePendingCreatePayload(
+          animalId,
+          patch,
+          imageAsset?.localUri ?? undefined,
+          imageAsset?.localUri ? 'imagem' : undefined
+        );
+      } else {
+        // Já existe no servidor: enfileira um PUT.
+        enqueueOperation({
+          entity: 'animal',
+          localId: animalId,
+          method: 'put',
+          endpoint: `/animais/${animalId}`,
+          payload: patch,
+          localImageUri: imageAsset?.localUri ?? null,
+          imageField: imageAsset?.localUri ? 'imagem' : null,
+        });
+        runSync().catch((err) => console.error('[EditAnimal] Erro ao sincronizar edição:', err));
       }
 
-      await api.put(`/animais/${animalId}`, form);
-      Alert.alert('Sucesso', 'Animal atualizado com sucesso.', [
+      Alert.alert('Sucesso', 'Animal atualizado. Será sincronizado automaticamente quando houver internet.', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
-
     } catch (error: any) {
-      console.error('EditAnimal Unexpected error:', error);
-      Alert.alert('Erro', error?.response?.data?.message || error?.message || 'Erro inesperado ao atualizar animal');
+      console.error('[EditAnimal] Erro ao salvar:', error);
+      Alert.alert('Erro', 'Não foi possível salvar as alterações.');
     } finally {
       setLoading(false);
     }

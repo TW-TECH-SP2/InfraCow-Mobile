@@ -1,11 +1,13 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, Platform, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
 import { saveImageLocally } from "../../services/imageStorage";
-import api from "../../services/api";
+import { generateLocalId, saveAnimalLocally, resolveId, getFazendaById } from "../../storage/repository";
+import { enqueueOperation } from "../../storage/outbox";
+import { runSync } from "../../services/syncManager";
 
 const gerarCodigoAleatorio = () => {
   const num = Math.floor(Math.random() * 900000) + 100000;
@@ -31,11 +33,14 @@ export default function RegisterAnimal() {
   const [tipo, setTipo] = useState("");
 
   const routeFarm = route.params?.farm;
-  const farmIdValue = routeFarm?.id_fazenda ?? routeFarm?.id ?? null;
-  const farmId = farmIdValue !== null && farmIdValue !== undefined && String(farmIdValue).trim() !== ''
-    ? String(farmIdValue)
-    : '';
-  const farmName = routeFarm?.nome_fazenda ?? routeFarm?.name ?? '';
+  const rawFarmId = routeFarm?.id_fazenda ?? routeFarm?.id ?? null;
+
+  // resolveId traduz um id local que já virou id do servidor. Sem isso, um
+  // animal cadastrado logo depois da fazenda ficava amarrado a um id que não
+  // existia mais: sumia do rebanho e o POST /animais era recusado.
+  const farmId = resolveId(rawFarmId);
+  const farmAtual = getFazendaById(farmId) ?? routeFarm;
+  const farmName = farmAtual?.nome_fazenda ?? farmAtual?.name ?? '';
 
   useEffect(() => {
     if (route.params?.rfidCode) {
@@ -77,7 +82,7 @@ export default function RegisterAnimal() {
   const lerTagNfc = () => {
     navigation.navigate('PositionRfid', {
       mode: 'register',
-      farm: routeFarm,
+      farm: farmAtual,
     });
   };
 
@@ -110,30 +115,46 @@ export default function RegisterAnimal() {
     setLoading(true);
     try {
       const localImageUri = imageAsset?.localUri ?? imageAsset?.uri ?? null;
-      const form = new FormData();
-      form.append('nome_animal', name);
-      form.append('codigo', codigo);
-      form.append('genero', genero);
-      form.append('tipo', tipo);
-      form.append('raca', raca);
-      form.append('peso', String(peso));
-      form.append('idade', String(idade));
-      form.append('id_fazenda', farmId);
 
-      if (localImageUri && Platform.OS !== 'web') {
-        const filename = localImageUri.split('/').pop() || 'photo.jpg';
-        const ext = filename.match(/\.(\w+)$/)?.[1] ?? 'jpg';
-        (form as any).append('imagem', { uri: localImageUri, name: filename, type: `image/${ext}` });
-      }
+      // Vai pro servidor. O id_fazenda é resolvido de novo aqui porque a
+      // fazenda pode ter sincronizado enquanto o formulário estava aberto.
+      const animalPayload = {
+        nome_animal: name,
+        codigo,
+        genero,
+        tipo,
+        raca,
+        peso: String(peso),
+        idade: String(idade),
+        id_fazenda: resolveId(farmId),
+      };
 
-      await api.post('/animais', form);
-      Alert.alert('Sucesso', 'Animal cadastrado com sucesso.', [
-        { text: 'OK', onPress: () => navigation.navigate('Herd', { farm: routeFarm }) },
-      ]);
+      // Fica no celular — agora COM a foto escolhida (imagem + localImageUri),
+      // que é o que o Rebanho e a tela de medição usam pra exibir o card.
+      const localId = generateLocalId('animal');
+      const registroLocal = {
+        ...animalPayload,
+        imagem: localImageUri,
+        localImageUri,
+      };
+      saveAnimalLocally(registroLocal, localId, animalPayload.id_fazenda);
+
+      enqueueOperation({
+        entity: 'animal',
+        localId,
+        method: 'post',
+        endpoint: '/animais',
+        payload: animalPayload,
+        localImageUri,
+        imageField: 'imagem',
+      });
+
+      runSync();
+
+      navigation.navigate('Herd', { farm: farmAtual });
     } catch (error: any) {
-      console.error('[RegisterAnimal] Erro:', error?.response?.status, JSON.stringify(error?.response?.data));
-      const message = error?.response?.data?.message ?? error?.response?.data?.error ?? error?.message ?? 'Erro desconhecido';
-      Alert.alert('Erro', 'Não foi possível cadastrar o animal: ' + message);
+      console.error('[RegisterAnimal] Erro:', error?.message);
+      Alert.alert('Erro', 'Não foi possível salvar o animal: ' + (error?.message ?? 'erro desconhecido'));
     } finally {
       setLoading(false);
     }
