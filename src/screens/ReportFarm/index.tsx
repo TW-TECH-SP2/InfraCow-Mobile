@@ -13,6 +13,8 @@ import Constants from "expo-constants";
 import { getAnimaisByFazenda, getMedicoesByAnimal } from "../../storage/repository";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import { imagemParaDataUri } from "../../services/pdfImage";
+import { getTempLevel, isTempAlert } from "../../utils/temperatureStatus";
 
 const DEFAULT_FARM_NAME = "Fazenda";
 const DEFAULT_ANIMAL_IMAGE = require("../../../assets/cow1.png");
@@ -44,10 +46,14 @@ type AnimalRow = { name: string; temp: number; imageUri: string | null; image: I
 
 
 const getStatus = (temp: number) => {
-  if (temp < 36) return "Baixa";
-  if (temp > 39) return "Alta";
+  if (!temp) return "Sem medição";
+  const level = getTempLevel(temp);
+  if (level === "low") return "Baixa";
+  if (level === "high") return "Alta";
   return "Normal";
 };
+
+const formatTemp = (temp: number) => (temp > 0 ? `${temp}°C` : "--");
 
 export default function ReportFarm() {
   const navigation = useNavigation<any>();
@@ -73,8 +79,7 @@ export default function ReportFarm() {
           return;
         }
 
-        // Relatório é gerado a partir do que está salvo no celular — não
-        // depende de internet nem espera nenhum sync.
+
         const animaisDaFazenda = getAnimaisByFazenda(String(farmId));
 
         const mapped: AnimalRow[] = animaisDaFazenda.map((a: any) => {
@@ -108,20 +113,23 @@ export default function ReportFarm() {
     load();
   }, [route.params]);
 
-  const measured = animals.length;
+  // Animal sem medição vem com temp = 0: não conta como medido, não entra na
+  // média e não gera alerta.
+  const comMedicao = animals.filter((a) => a.temp > 0);
+  const measured = comMedicao.length;
 
-  const avgTemp = measured > 0 ? animals.reduce((acc, a) => acc + a.temp, 0) / measured : 0;
+  const avgTemp = measured > 0 ? comMedicao.reduce((acc, a) => acc + a.temp, 0) / measured : 0;
 
-  const alerts = animals.filter((a) => a.temp < 36 || a.temp > 39).length;
+  const alerts = comMedicao.filter((a) => isTempAlert(a.temp)).length;
 
-  const generateHTML = () => {
+  const generateHTML = (fotos: (string | null)[]) => {
     const rows = animals
       .map(
-        (a) => `
+        (a, i) => `
         <tr>
-          <td>${a.imageUri ? `<img src="${a.imageUri}" width="50" height="50" style="border-radius: 6px; object-fit: cover;" />` : ''}</td>
+          <td>${fotos[i] ? `<img src="${fotos[i]}" width="50" height="50" style="border-radius: 6px; object-fit: cover;" />` : ''}</td>
           <td>${a.name}</td>
-          <td>${a.temp}°C</td>
+          <td>${formatTemp(a.temp)}</td>
           <td>${getStatus(a.temp)}</td>
         </tr>
       `
@@ -154,13 +162,14 @@ export default function ReportFarm() {
   };
 
   const handleDownload = async () => {
-    const html = generateHTML();
-
-    const { uri } = await Print.printToFileAsync({
-      html,
-    });
-
-    await Sharing.shareAsync(uri);
+    try {
+      const fotos = await Promise.all(animals.map((a) => imagemParaDataUri(a.imageUri)));
+      const html = generateHTML(fotos);
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri);
+    } catch (error) {
+      console.log("Erro ao gerar PDF:", error);
+    }
   };
 
   return (
@@ -205,7 +214,7 @@ export default function ReportFarm() {
               <Image source={item.image} style={{ width: 44, height: 44, borderRadius: 8, marginRight: 12 }} />
               <View>
                 <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.info}>{item.temp}°C • {getStatus(item.temp)}</Text>
+                <Text style={styles.info}>{formatTemp(item.temp)} • {getStatus(item.temp)}</Text>
               </View>
             </View>
           ))}

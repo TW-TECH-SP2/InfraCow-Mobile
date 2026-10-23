@@ -20,6 +20,7 @@ import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { Alert } from "react-native";
 import { getNotifications, deleteNotification, getAnimalById } from "../../storage/repository";
 import { runSync } from "../../services/syncManager";
+import { getTempLevel } from "../../utils/temperatureStatus";
 
 type NotificationItem = {
   id: string;
@@ -47,7 +48,9 @@ const getStatus = (temp?: number | null) => {
     };
   }
 
-  if (val <= 34) {
+  const level = getTempLevel(val);
+
+  if (level === "low") {
     return {
       type: "low",
       message:
@@ -56,7 +59,7 @@ const getStatus = (temp?: number | null) => {
     };
   }
 
-  if (val >= 38.7) {
+  if (level === "high") {
     return {
       type: "high",
       message:
@@ -76,9 +79,7 @@ const DEFAULT_ANIMAL_IMAGE = require("../../../assets/cow1.png");
 
 const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
-// Antes o servidor mandava hora/dia/mes/dia_semana já separados; agora a
-// notificação é gerada local a partir de medicao.datahora (ISO), então
-// formatamos aqui.
+
 const formatDatetime = (iso?: string | null) => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -137,10 +138,7 @@ export default function NotificationsScreen() {
   const [selected, setSelected] = useState<NotificationItem | null>(null);
   const navigation = useNavigation<any>();
 
-  // Lê as notificações já geradas localmente (por saveMedicaoLocally, toda
-  // vez que uma medição é salva — offline ou online — e também quando o
-  // sync baixa medições novas do servidor via upsertMedicoes). Não depende
-  // mais do endpoint /notificacoes.
+
   const loadFromLocal = (): NotificationItem[] => {
     const rows = getNotifications();
     return rows.map((n: any) => {
@@ -167,9 +165,7 @@ export default function NotificationsScreen() {
     });
   };
 
-  // Mostra as notificações locais na hora, sincroniza em paralelo (baixa
-  // medições novas do servidor — o que pode gerar notificações novas via
-  // upsertMedicoes) e relê. Sem internet, fica só com o que já tinha local.
+
   useFocusEffect(
     useCallback(() => {
       let mounted = true;
@@ -194,8 +190,7 @@ export default function NotificationsScreen() {
   );
 
   const handleRemove = (id: string) => {
-    // Notificação é uma entidade só local (nunca existiu no servidor pra
-    // esse app), então apagar é só remover do SQLite — não precisa de rede.
+
     try {
       deleteNotification(id);
       if (selected?.id === id) {

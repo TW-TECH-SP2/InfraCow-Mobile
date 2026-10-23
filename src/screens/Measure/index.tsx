@@ -12,6 +12,7 @@ import { startUsbMeasurement, MeasurementResult } from "../../services/measureme
 import { generateLocalId, saveMedicaoLocally } from "../../storage/repository";
 import { enqueueOperation } from "../../storage/outbox";
 import { runSync } from "../../services/syncManager";
+import { getTempLevel } from "../../utils/temperatureStatus";
 
 type MeasureParams = {
   farm?: any;
@@ -21,11 +22,7 @@ type MeasureParams = {
 
 type MeasureStatus = "idle" | "loading" | "low" | "normal" | "high";
 
-const getStatusByTemperature = (temp: number): "low" | "normal" | "high" => {
-  if (temp <= 34) return "low"; // hipotermia
-  if (temp >= 38.7) return "high"; // hipertermia / febre
-  return "normal";
-};
+const getStatusByTemperature = (temp: number): "low" | "normal" | "high" => getTempLevel(temp);
 
 const isFinished = (status: MeasureStatus) => status === "low" || status === "normal" || status === "high";
 
@@ -80,7 +77,7 @@ export default function MeasureScreen() {
     try {
       setStatus("loading");
       setTemperatureText("...");
-      setResultMessage("Medindo... aguarde 10 segundos.");
+      setResultMessage("Medindo... aguarde.");
       setLastTemperature(null);
       setRecordSaved(false);
 

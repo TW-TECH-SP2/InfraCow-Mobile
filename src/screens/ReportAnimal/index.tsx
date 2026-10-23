@@ -13,6 +13,8 @@ import Constants from "expo-constants";
 import { getAnimalById, getMedicoesByAnimal } from "../../storage/repository";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import { imagemParaDataUri } from "../../services/pdfImage";
+import { getTempLevel } from "../../utils/temperatureStatus";
 
 const DEFAULT_ANIMAL_IMAGE = require("../../../assets/cow1.png");
 
@@ -75,8 +77,9 @@ const DATE_FORMAT = (iso?: string) => {
 type Medicao = { date: string; temp: number };
 
 const getStatus = (temp: number) => {
-  if (temp < 33.6) return "Hipotermia";
-  if (temp > 37) return "Febre";
+  const level = getTempLevel(temp);
+  if (level === "low") return "Hipotermia";
+  if (level === "high") return "Febre";
   return "Normal";
 };
 
@@ -138,7 +141,7 @@ export default function ReportAnimal() {
   const latestTemp = history[0]?.temp ?? null;
   const suggestion = latestTemp != null ? SUGESTOES[getStatus(latestTemp)] : null;
 
-  const generateHTML = () => {
+  const generateHTML = (fotoDataUri: string | null) => {
     const rows = history
       .map((item) => `
         <tr>
@@ -153,7 +156,7 @@ export default function ReportAnimal() {
         <body style="font-family: Arial; padding: 20px;">
           <h1>Relatório de bovino: ${animalName}</h1>
 
-          ${animalImageUri ? `<img src="${animalImageUri}" width="160" style="border-radius: 8px; margin-bottom: 12px;" />` : ''}
+          ${fotoDataUri ? `<img src="${fotoDataUri}" width="160" style="border-radius: 8px; margin-bottom: 12px;" />` : ''}
 
           <h3>Dados do animal</h3>
           <p><strong>Raça:</strong> ${animalData?.raca ?? '-'}</p>
@@ -190,8 +193,8 @@ export default function ReportAnimal() {
 
   const handleDownload = async () => {
     try {
-      const html = generateHTML();
-      await new Promise(resolve => setTimeout(resolve, 100));
+      const fotoDataUri = await imagemParaDataUri(animalImageUri);
+      const html = generateHTML(fotoDataUri);
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       await Sharing.shareAsync(uri);
     } catch (error) {

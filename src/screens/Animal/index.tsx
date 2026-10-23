@@ -20,6 +20,7 @@ import DateTimePickerModal from "react-native-modal-datetime-picker";
 import { useWindowDimensions } from "react-native";
 import Constants from "expo-constants";
 import { getMedicoesByAnimal, deleteAnimalLocally } from "../../storage/repository";
+import { getTempBand } from "../../utils/temperatureStatus";
 import { enqueueOperation } from "../../storage/outbox";
 import { runSync } from "../../services/syncManager";
 
@@ -164,10 +165,12 @@ export default function AnimalScreen() {
     if (temp === null || temp === undefined) {
       return { image: require("../../../assets/chartanimal.png"), text: "--", color: "#ccc" };
     }
-    if (temp <= 34) return { image: require("../../../assets/chartanimal-blue.png"), text: `${temp.toFixed(1)}°C`, color: "#fff" };
-    if (temp <= 38) return { image: require("../../../assets/chartanimal-green.png"), text: `${temp.toFixed(1)}°C`, color: "#fff" };
-    if (temp <= 38.7) return { image: require("../../../assets/chartanimal-orange.png"), text: `${temp.toFixed(1)}°C`, color: "#fff" };
-    return { image: require("../../../assets/chartanimal-red.png"), text: `${temp.toFixed(1)}°C`, color: "#fff" };
+    const band = getTempBand(temp);
+    const text = `${temp.toFixed(1)}°C`;
+    if (band === "low") return { image: require("../../../assets/chartanimal-blue.png"), text, color: "#fff" };
+    if (band === "normal") return { image: require("../../../assets/chartanimal-green.png"), text, color: "#fff" };
+    if (band === "attention") return { image: require("../../../assets/chartanimal-orange.png"), text, color: "#fff" };
+    return { image: require("../../../assets/chartanimal-red.png"), text, color: "#fff" };
   };
 
   const handleDeleteAnimal = async () => {

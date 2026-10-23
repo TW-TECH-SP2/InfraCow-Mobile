@@ -9,6 +9,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Navbar from "../../components/Navbar";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { getAnimaisByFazenda, getMedicoesByAnimal, deleteFazendaLocally } from "../../storage/repository";
+import { getTempBand } from "../../utils/temperatureStatus";
 import { enqueueOperation } from "../../storage/outbox";
 import { runSync } from "../../services/syncManager";
 
@@ -148,10 +149,12 @@ const detectGender = (genero: any): string => {
 
 const getTemperatureData = (temp?: number | null) => {
   if (temp == null) return { image: require("../../../assets/chart.png"), text: "--", color: "#ccc" };
-  if (temp <= 34) return { image: require("../../../assets/chart-blue.png"), text: `${temp.toFixed(1)}°C`, color: "#fff" };
-  if (temp <= 38) return { image: require("../../../assets/chart-green.png"), text: `${temp.toFixed(1)}°C`, color: "#fff" };
-  if (temp <= 38.7) return { image: require("../../../assets/chart-orange.png"), text: `${temp.toFixed(1)}°C`, color: "#fff" };
-  return { image: require("../../../assets/chart-red.png"), text: `${temp.toFixed(1)}°C`, color: "#fff" };
+  const band = getTempBand(temp);
+  const text = `${temp.toFixed(1)}°C`;
+  if (band === "low") return { image: require("../../../assets/chart-blue.png"), text, color: "#fff" };
+  if (band === "normal") return { image: require("../../../assets/chart-green.png"), text, color: "#fff" };
+  if (band === "attention") return { image: require("../../../assets/chart-orange.png"), text, color: "#fff" };
+  return { image: require("../../../assets/chart-red.png"), text, color: "#fff" };
 };
 
 export default function FarmScreen() {
