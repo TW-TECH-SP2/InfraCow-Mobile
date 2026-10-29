@@ -60,7 +60,7 @@ initSerialport({
   autoConnect: false,
   mode: Mode.ASYNC,
   params: {
-    driver: DriverType.AUTO,
+    driver: DriverType.CDC,
     baudRate: BAUD_RATE,
     returnedDataType: ReturnedDataType.UTF8,
   },
@@ -96,8 +96,9 @@ function ensureListener() {
   serialport.startListening(({ type, deviceId, errorCode, errorMessage, data }) => {
     if (type === "onReadData") {
       rxBytes += (data ?? "").length;
+      console.log("[USB RX]", JSON.stringify((data ?? "").slice(0, 80)));
     } else {
-      logEvent(`${type}${deviceId !== undefined ? ` id=${deviceId}` : ""}${errorCode ? ` err=${errorCode}` : ""}`);
+        logEvent(`${type}${deviceId !== undefined ? ` id=${deviceId}` : ""}${errorCode ? ` err=${errorCode}` : ""}`);
     }
 
     switch (type) {
@@ -160,10 +161,10 @@ async function ensureConnected(): Promise<void> {
   resetConnectionState();
   activeDeviceId = deviceId;
 
-  serialport.setParams(
-    { driver: DriverType.AUTO, baudRate: BAUD_RATE, returnedDataType: ReturnedDataType.UTF8 },
-    deviceId,
-  );
+serialport.setParams(
+  { driver: DriverType.CDC, baudRate: BAUD_RATE, returnedDataType: ReturnedDataType.UTF8 },
+  deviceId,
+);
 
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -254,7 +255,6 @@ function requestMeasurement(): Promise<MeasurementResult> {
     };
 
     lineBuffer = "";
-    rxBytes = 0;
     logEvent(`envia MEDIR id=${activeDeviceId}`);
     try {
       serialport.writeString("MEDIR\n", activeDeviceId, 0);
