@@ -18,7 +18,6 @@ type EspResponse = { leituras: EspReading[] };
 
 const BAUD_RATE = 115200;
 
-
 const BOOT_WAIT_MS = 2500;
 const CONNECT_TIMEOUT_MS = 30000;
 const MEASUREMENT_TIMEOUT_MS = 4000;
@@ -39,8 +38,7 @@ type Waiter = {
 let waiter: Waiter | null = null;
 let busy = false;
 
-// Diagnóstico: guarda os últimos eventos USB e mostra junto com o erro,
-// para ver o que realmente aconteceu na conexão.
+// Diagnóstico
 const trail: string[] = [];
 let trailStart = Date.now();
 let rxBytes = 0;
@@ -88,7 +86,6 @@ function hardDisconnect() {
   resetConnectionState();
 }
 
-
 function ensureListener() {
   if (listenerStarted) return;
   listenerStarted = true;
@@ -98,7 +95,7 @@ function ensureListener() {
       rxBytes += (data ?? "").length;
       console.log("[USB RX]", JSON.stringify((data ?? "").slice(0, 80)));
     } else {
-        logEvent(`${type}${deviceId !== undefined ? ` id=${deviceId}` : ""}${errorCode ? ` err=${errorCode}` : ""}`);
+      logEvent(`${type}${deviceId !== undefined ? ` id=${deviceId}` : ""}${errorCode ? ` err=${errorCode}` : ""}`);
     }
 
     switch (type) {
@@ -141,14 +138,33 @@ function sleep(ms: number) {
 }
 
 async function ensureConnected(): Promise<void> {
+  // 🔧 LOG: lista todos os dispositivos USB vistos pelo Android
   const devices = await serialport.listDevices();
+  console.log("[USB devices]", JSON.stringify(devices));
+
   if (!devices || devices.length === 0) {
     resetConnectionState();
     throw new Error("Nenhum dispositivo USB encontrado.");
   }
 
-  const dev: any = devices[0];
+  // 🔧 Se houver mais de um, tenta escolher o que parece ser o ESP.
+  // ESP32-S3: vendorId 0x303A (12346); CP2102: 0x10C4 (4292); CH340: 0x1A86 (6790)
+  const espVendorIds = [12346, 4292, 6790];
+  const espDevice =
+    devices.find((d: any) => {
+      const vid = Number(d?.vendorId ?? d?.vendor_id ?? -1);
+      return espVendorIds.includes(vid);
+    }) ?? devices[0];
+
+  const dev: any = espDevice;
   const deviceId: number = dev?.deviceId ?? dev?.id ?? -1;
+
+  if (deviceId === -1) {
+    resetConnectionState();
+    throw new Error("Dispositivo USB sem deviceId válido.");
+  }
+
+  logEvent(`dispositivo escolhido id=${deviceId} vid=${dev?.vendorId ?? "?"}`);
 
   if (connected && activeDeviceId === deviceId) {
     const stillOpen = await serialport.isConnected(deviceId).catch(() => false);
@@ -161,10 +177,10 @@ async function ensureConnected(): Promise<void> {
   resetConnectionState();
   activeDeviceId = deviceId;
 
-serialport.setParams(
-  { driver: DriverType.CDC, baudRate: BAUD_RATE, returnedDataType: ReturnedDataType.UTF8 },
-  deviceId,
-);
+  serialport.setParams(
+    { driver: DriverType.CDC, baudRate: BAUD_RATE, returnedDataType: ReturnedDataType.UTF8 },
+    deviceId,
+  );
 
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -188,17 +204,47 @@ serialport.setParams(
     serialport.connect(deviceId);
   });
 
-
   await sleep(BOOT_WAIT_MS);
 
-  // A placa (USB nativo) pode reiniciar e "sumir" do USB durante a espera.
-  // Antes isso passava em branco e o MEDIR era enviado para um dispositivo
-  // que não existia mais (resultado: Timeout).
   if (!connected || activeDeviceId === -1) {
     throw new Error("DESCONECTOU_NA_ESPERA");
   }
 
   lineBuffer = "";
+}
+
+// 🔧 Escreve "MEDIR\n" garantindo que os 6 bytes saiam.
+// Tenta writeString; se o retorno indicar que não escreveu tudo,
+// cai para escrita byte a byte via writeString de 1 caractere.
+function writeMedirCommand(): void {
+  const cmd = "MEDIR\n";
+  const expected = cmd.length; // 6
+
+  let sent: any = undefined;
+  try {
+    sent = (serialport as any).writeString(cmd, activeDeviceId, 0);
+  } catch (e: any) {
+    logEvent(`writeString EXCEPTION: ${e?.message ?? e}`);
+  }
+  logEvent(`writeString ret=${sent} expected=${expected}`);
+
+  // Se retornou um número >= 6, considera OK
+  if (typeof sent === "number" && sent >= expected) {
+    return;
+  }
+
+  // Fallback: manda byte a byte
+  logEvent("fallback: escrevendo byte a byte");
+  try {
+    for (let i = 0; i < cmd.length; i++) {
+      const ch = cmd.charAt(i);
+      const r = (serialport as any).writeString(ch, activeDeviceId, 0);
+      logEvent(`byte[${i}]='${ch === "\n" ? "\\n" : ch}' ret=${r}`);
+    }
+  } catch (e: any) {
+    logEvent(`fallback EXCEPTION: ${e?.message ?? e}`);
+    throw new Error(`Falha ao enviar o comando: ${e?.message ?? e}`);
+  }
 }
 
 function requestMeasurement(): Promise<MeasurementResult> {
@@ -255,11 +301,11 @@ function requestMeasurement(): Promise<MeasurementResult> {
     };
 
     lineBuffer = "";
-    logEvent(`envia MEDIR id=${activeDeviceId}`);
+    logEvent(`envia MEDIR id=${activeDeviceId} connected=${connected}`);
     try {
-      serialport.writeString("MEDIR\n", activeDeviceId, 0);
+      writeMedirCommand();
     } catch (e: any) {
-      done(() => reject(new Error(`Falha ao enviar o comando: ${e?.message ?? e}`)));
+      done(() => reject(new Error(e?.message ?? String(e))));
     }
   });
 }
@@ -278,8 +324,6 @@ export async function startUsbMeasurement(): Promise<MeasurementResult> {
     } catch (e: any) {
       if (e?.message !== "DESCONECTOU_NA_ESPERA") throw e;
 
-      // A placa reiniciou logo após conectar: dá um tempo para o Android
-      // enxergá-la de novo e tenta mais uma vez.
       logEvent("reconectando");
       await sleep(1500);
       try {
