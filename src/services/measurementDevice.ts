@@ -39,6 +39,23 @@ type Waiter = {
 let waiter: Waiter | null = null;
 let busy = false;
 
+// Diagnóstico: guarda os últimos eventos USB e mostra junto com o erro,
+// para ver o que realmente aconteceu na conexão.
+const trail: string[] = [];
+let trailStart = Date.now();
+let rxBytes = 0;
+
+function logEvent(msg: string) {
+  const line = `${Date.now() - trailStart}ms ${msg}`;
+  trail.push(line);
+  if (trail.length > 12) trail.shift();
+  console.log("[USB]", line);
+}
+
+function trailText() {
+  return trail.length ? ` [${trail.join(" | ")}]` : "";
+}
+
 initSerialport({
   autoConnect: false,
   mode: Mode.ASYNC,
@@ -77,6 +94,12 @@ function ensureListener() {
   listenerStarted = true;
 
   serialport.startListening(({ type, deviceId, errorCode, errorMessage, data }) => {
+    if (type === "onReadData") {
+      rxBytes += (data ?? "").length;
+    } else {
+      logEvent(`${type}${deviceId !== undefined ? ` id=${deviceId}` : ""}${errorCode ? ` err=${errorCode}` : ""}`);
+    }
+
     switch (type) {
       case "onConnected": {
         activeDeviceId = deviceId ?? activeDeviceId;
@@ -166,6 +189,14 @@ async function ensureConnected(): Promise<void> {
 
 
   await sleep(BOOT_WAIT_MS);
+
+  // A placa (USB nativo) pode reiniciar e "sumir" do USB durante a espera.
+  // Antes isso passava em branco e o MEDIR era enviado para um dispositivo
+  // que não existia mais (resultado: Timeout).
+  if (!connected || activeDeviceId === -1) {
+    throw new Error("DESCONECTOU_NA_ESPERA");
+  }
+
   lineBuffer = "";
 }
 
@@ -184,7 +215,7 @@ function requestMeasurement(): Promise<MeasurementResult> {
     const timer = setTimeout(() => {
       done(() => {
         hardDisconnect();
-        reject(new Error("Timeout: o dispositivo não respondeu a tempo."));
+        reject(new Error(`Timeout: o dispositivo não respondeu a tempo. (recebido: ${rxBytes} bytes)${trailText()}`));
       });
     }, MEASUREMENT_TIMEOUT_MS);
 
@@ -223,7 +254,13 @@ function requestMeasurement(): Promise<MeasurementResult> {
     };
 
     lineBuffer = "";
-    serialport.writeString("MEDIR\n", activeDeviceId, 0);
+    rxBytes = 0;
+    logEvent(`envia MEDIR id=${activeDeviceId}`);
+    try {
+      serialport.writeString("MEDIR\n", activeDeviceId, 0);
+    } catch (e: any) {
+      done(() => reject(new Error(`Falha ao enviar o comando: ${e?.message ?? e}`)));
+    }
   });
 }
 
@@ -232,7 +269,29 @@ export async function startUsbMeasurement(): Promise<MeasurementResult> {
   busy = true;
   try {
     ensureListener();
-    await ensureConnected();
+    trail.length = 0;
+    trailStart = Date.now();
+    rxBytes = 0;
+
+    try {
+      await ensureConnected();
+    } catch (e: any) {
+      if (e?.message !== "DESCONECTOU_NA_ESPERA") throw e;
+
+      // A placa reiniciou logo após conectar: dá um tempo para o Android
+      // enxergá-la de novo e tenta mais uma vez.
+      logEvent("reconectando");
+      await sleep(1500);
+      try {
+        await ensureConnected();
+      } catch (e2: any) {
+        if (e2?.message === "DESCONECTOU_NA_ESPERA") {
+          throw new Error(`A placa desconecta do USB logo após conectar (reinicia ao abrir a porta).${trailText()}`);
+        }
+        throw e2;
+      }
+    }
+
     return await requestMeasurement();
   } finally {
     busy = false;
