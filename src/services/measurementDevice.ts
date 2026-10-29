@@ -20,11 +20,13 @@ const BAUD_RATE = 115200;
 
 const BOOT_WAIT_MS = 2500;
 const CONNECT_TIMEOUT_MS = 30000;
-const MEASUREMENT_TIMEOUT_MS = 4000;
+const MEASUREMENT_TIMEOUT_MS = 8000;
+const RESEND_EVERY_MS = 1500;
 
 const serialport = new Serialport();
 
 let activeDeviceId = -1;
+let activePortInterface = -1; // interface que a biblioteca abriu (vem no evento onConnected)
 let connected = false;
 let listenerStarted = false;
 
@@ -58,7 +60,7 @@ initSerialport({
   autoConnect: false,
   mode: Mode.ASYNC,
   params: {
-    driver: DriverType.CDC,
+    driver: DriverType.AUTO,
     baudRate: BAUD_RATE,
     returnedDataType: ReturnedDataType.UTF8,
   },
@@ -78,6 +80,7 @@ function classifyTemperature(temp: number): Pick<MeasurementResult, "status" | "
 function resetConnectionState() {
   connected = false;
   activeDeviceId = -1;
+  activePortInterface = -1;
   lineBuffer = "";
 }
 
@@ -90,7 +93,7 @@ function ensureListener() {
   if (listenerStarted) return;
   listenerStarted = true;
 
-  serialport.startListening(({ type, deviceId, errorCode, errorMessage, data }) => {
+  serialport.startListening(({ type, deviceId, errorCode, errorMessage, data, portInterface }: any) => {
     if (type === "onReadData") {
       rxBytes += (data ?? "").length;
       console.log("[USB RX]", JSON.stringify((data ?? "").slice(0, 80)));
@@ -101,6 +104,8 @@ function ensureListener() {
     switch (type) {
       case "onConnected": {
         activeDeviceId = deviceId ?? activeDeviceId;
+        activePortInterface = typeof portInterface === "number" ? portInterface : -1;
+        logEvent(`porta aberta if=${activePortInterface}`);
         connected = true;
         waiter?.onConnected?.();
         break;
@@ -178,7 +183,7 @@ async function ensureConnected(): Promise<void> {
   activeDeviceId = deviceId;
 
   serialport.setParams(
-    { driver: DriverType.CDC, baudRate: BAUD_RATE, returnedDataType: ReturnedDataType.UTF8 },
+    { driver: DriverType.AUTO, baudRate: BAUD_RATE, returnedDataType: ReturnedDataType.UTF8 },
     deviceId,
   );
 
@@ -213,36 +218,15 @@ async function ensureConnected(): Promise<void> {
   lineBuffer = "";
 }
 
-// 🔧 Escreve "MEDIR\n" garantindo que os 6 bytes saiam.
-// Tenta writeString; se o retorno indicar que não escreveu tudo,
-// cai para escrita byte a byte via writeString de 1 caractere.
+// Escreve "MEDIR\n" na mesma interface que a biblioteca abriu.
+// (writeString retorna void; o antigo "fallback byte a byte" sempre disparava
+// e mandava o comando duas vezes.)
 function writeMedirCommand(): void {
-  const cmd = "MEDIR\n";
-  const expected = cmd.length; // 6
-
-  let sent: any = undefined;
   try {
-    sent = (serialport as any).writeString(cmd, activeDeviceId, 0);
+    serialport.writeString("MEDIR\n", activeDeviceId, activePortInterface);
+    logEvent(`MEDIR enviado id=${activeDeviceId} if=${activePortInterface}`);
   } catch (e: any) {
     logEvent(`writeString EXCEPTION: ${e?.message ?? e}`);
-  }
-  logEvent(`writeString ret=${sent} expected=${expected}`);
-
-  // Se retornou um número >= 6, considera OK
-  if (typeof sent === "number" && sent >= expected) {
-    return;
-  }
-
-  // Fallback: manda byte a byte
-  logEvent("fallback: escrevendo byte a byte");
-  try {
-    for (let i = 0; i < cmd.length; i++) {
-      const ch = cmd.charAt(i);
-      const r = (serialport as any).writeString(ch, activeDeviceId, 0);
-      logEvent(`byte[${i}]='${ch === "\n" ? "\\n" : ch}' ret=${r}`);
-    }
-  } catch (e: any) {
-    logEvent(`fallback EXCEPTION: ${e?.message ?? e}`);
     throw new Error(`Falha ao enviar o comando: ${e?.message ?? e}`);
   }
 }
@@ -250,11 +234,13 @@ function writeMedirCommand(): void {
 function requestMeasurement(): Promise<MeasurementResult> {
   return new Promise((resolve, reject) => {
     let settled = false;
+    let resend: ReturnType<typeof setInterval> | undefined;
 
     const done = (fn: () => void) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (resend) clearInterval(resend);
       waiter = null;
       fn();
     };
@@ -306,7 +292,18 @@ function requestMeasurement(): Promise<MeasurementResult> {
       writeMedirCommand();
     } catch (e: any) {
       done(() => reject(new Error(e?.message ?? String(e))));
+      return;
     }
+
+    // Se a placa ainda estava iniciando, o primeiro MEDIR se perde: reenvia
+    // até chegar a resposta (o firmware responde a cada MEDIR, é inofensivo).
+    resend = setInterval(() => {
+      if (settled) return;
+      try {
+        logEvent("reenvia MEDIR");
+        writeMedirCommand();
+      } catch (_) {}
+    }, RESEND_EVERY_MS);
   });
 }
 

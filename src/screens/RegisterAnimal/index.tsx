@@ -169,7 +169,6 @@ export default function RegisterAnimal() {
         <Image source={require("../../../assets/logoescura 1.png")} style={styles.logo} />
         <View style={styles.formContainer}>
           <Text style={styles.title}>Cadastro de Animal</Text>
-          {farmName ? <Text style={{ color: '#aaa', fontSize: 13, marginBottom: 8, textAlign: 'center' }}>Fazenda: {farmName}</Text> : null}
 
           <Text style={styles.inputLabel}>Nome do Animal: *</Text>
           <TextInput style={styles.input} value={name} placeholder="Ex.: Mimosa" placeholderTextColor="#D3D3D3" onChangeText={setName} editable={!loading} />
