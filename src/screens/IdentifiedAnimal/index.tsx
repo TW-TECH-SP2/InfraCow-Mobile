@@ -20,7 +20,7 @@ export default function IdentifiedAnimalScreen() {
         farm,
         animal,
       });
-    }, 3000); // 3 segundos
+    }, 3000);
 
     return () => clearTimeout(timer);
   }, [animal, farm]);

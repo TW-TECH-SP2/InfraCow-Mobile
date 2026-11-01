@@ -32,8 +32,8 @@ export default function RegisterFarm() {
       allowsEditing: true,
     });
     if (!result.canceled) {
-      // Já copia pro diretório permanente do app na hora da escolha: a uri do
-      // ImagePicker é de cache e pode sumir antes da sincronização.
+
+
       const asset = result.assets[0];
       try {
         const saved = await saveImageLocally(asset.uri, asset.mimeType ?? 'image/jpeg');
@@ -71,7 +71,7 @@ export default function RegisterFarm() {
         localImageUri = foto;
       }
 
-      // Isso vai pro servidor (só os campos que a API conhece).
+
       const fazendaPayload = {
         nome_fazenda: name,
         rua: street,
@@ -81,10 +81,10 @@ export default function RegisterFarm() {
         numero: numeroInt,
       };
 
-      // Isso fica salvo no celular. A DIFERENÇA em relação à versão anterior:
-      // a foto entra no registro local (imagem + localImageUri). Antes só o
-      // payload era gravado, sem imagem nenhuma — por isso a Home mostrava a
-      // imagem padrão do app até o celular pegar internet.
+
+
+
+
       const localId = generateLocalId('fazenda');
       const registroLocal = {
         ...fazendaPayload,
@@ -103,8 +103,8 @@ export default function RegisterFarm() {
         imageField: 'imagem',
       });
 
-      // Tenta sincronizar em segundo plano. Offline, não faz nada e a fila
-      // fica pra depois — sem travar a navegação e sem avisar nada ao usuário.
+
+
       runSync();
 
       const localFarm = { ...registroLocal, id_fazenda: localId };

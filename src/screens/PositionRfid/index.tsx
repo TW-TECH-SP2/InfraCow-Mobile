@@ -130,9 +130,9 @@ export default function PositionRfidScreen() {
 
       setMensagem('Identificando animal...');
 
-      // Lê direto do SQLite local — a leitura do brinco precisa funcionar
-      // sem sinal no pasto. Dispara um sync em segundo plano (sem esperar)
-      // só pra deixar a base local mais atualizada da próxima vez.
+
+
+
       runSync().catch(() => {});
       const allAnimals = getAllAnimais();
 

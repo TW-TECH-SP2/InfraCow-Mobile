@@ -50,10 +50,10 @@ export default function EditFarm() {
   const [number, setNumber] = useState("");
 
   useEffect(() => {
-    // Lê os dados da fazenda direto do SQLite local — funciona sem
-    // internet. O registro local já tem tudo que a API retornaria (é
-    // mantido sincronizado pelo pullFromServer), então não precisa mais
-    // chamar /fazendas/:id.
+
+
+
+
     const applyFarmData = (source: any) => {
       setName(source.nome_fazenda ?? source.nome ?? source.name ?? "");
       setStreet(source.rua ?? source.street ?? source.endereco ?? "");
@@ -123,14 +123,14 @@ export default function EditFarm() {
       if (number) patch.numero = number;
       if (imageAsset?.localUri) patch.localImageUri = imageAsset.localUri;
 
-      // Atualiza o registro local na hora — a edição aparece na tela mesmo
-      // sem internet.
+
+
       updateFazendaLocally(lookupId, patch);
 
       if (lookupId.startsWith('local_')) {
-        // Fazenda ainda não sincronizou: atualiza o payload do POST
-        // pendente em vez de mandar um PUT pra um id que o servidor nem
-        // conhece ainda.
+
+
+
         updatePendingCreatePayload(
           lookupId,
           patch,
@@ -138,7 +138,7 @@ export default function EditFarm() {
           imageAsset?.localUri ? 'imagem' : undefined
         );
       } else {
-        // Já existe no servidor: enfileira um PUT.
+
         enqueueOperation({
           entity: 'fazenda',
           localId: lookupId,

@@ -27,8 +27,8 @@ const getImageUrl = (imagePath?: string | null) => {
   if (!imagePath) return FALLBACK_IMAGE;
   const normalized = String(imagePath).trim();
   if (!normalized || normalized === "null" || normalized === "undefined") return FALLBACK_IMAGE;
-  // file:/blob:/data: = imagem salva no próprio celular (cadastro offline ou
-  // já sincronizado). http(s) = veio do servidor.
+
+
   if (/^https?:\/\//i.test(normalized) || /^(file:|blob:|data:)/i.test(normalized)) {
     return { uri: normalized };
   }
@@ -37,11 +37,7 @@ const getImageUrl = (imagePath?: string | null) => {
   return { uri: `${API_URL}/${fullPath}` };
 };
 
-/**
- * A foto guardada no aparelho tem prioridade sobre o caminho do servidor:
- * ela aparece na hora, com ou sem internet. Só cai pro caminho remoto quando
- * a fazenda veio do servidor e nunca teve foto local nesse celular.
- */
+
 const resolveFarmImage = (farm: FarmItem) => getImageUrl(farm.localImageUri ?? farm.imagem ?? null);
 
 const formatAddress = (farm: FarmItem) => {

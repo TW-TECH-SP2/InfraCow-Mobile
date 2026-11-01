@@ -9,7 +9,6 @@ import Navbar from "../../components/Navbar";
 type TutorialVideo = {
   id: string;
   name: string;
-  /** ID do vídeo no YouTube (a parte depois de /shorts/ ou de ?v=). Sem ID = "Em breve". */
   youtubeId?: string;
 };
 
@@ -27,15 +26,13 @@ const videos: TutorialVideo[] = [
   {
     id: "3",
     name: "Aula 03 - Medir temperatura",
-    // youtubeId: "COLOQUE_O_ID_AQUI",
+
   },
 ];
 
 const COVER = require("../../../assets/video.png");
 const PLAY_ICON = require("../../../assets/playvideo.png");
 
-// Só deixa o WebView navegar dentro do YouTube/Google. Qualquer outro link
-// (ex.: toque em um anúncio) abre no navegador do celular.
 const ALLOWED_URL =
   /^(about:|https:\/\/([a-z0-9-]+\.)*(youtube\.com|youtube-nocookie\.com|google\.com|gstatic\.com|googlevideo\.com|ytimg\.com|doubleclick\.net))/i;
 
@@ -71,7 +68,7 @@ function VideoCard({ item, playing, onPlay }: VideoCardProps) {
   const handlePlay = async () => {
     if (!youtubeId) return;
 
-    // O player precisa de internet. Avisa em vez de mostrar uma tela quebrada.
+
     const net = await NetInfo.fetch();
     if (!net.isConnected || net.isInternetReachable === false) {
       setOffline(true);
@@ -148,7 +145,7 @@ function VideoCard({ item, playing, onPlay }: VideoCardProps) {
 }
 
 export default function TutorialScreen() {
-  // Só um vídeo toca por vez: ao abrir outro, o anterior volta para a capa.
+
   const [playingId, setPlayingId] = useState<string | null>(null);
 
   return (

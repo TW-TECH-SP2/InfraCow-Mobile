@@ -1,10 +1,7 @@
 import { db } from "./db";
 import { removeOperationsByLocalId } from "./outbox";
 
-/**
- * Gera um id local temporário pra registros criados offline, antes de
- * saber o id definitivo que o servidor vai dar quando sincronizar.
- */
+
 export function generateLocalId(prefix: string) {
   return `local_${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -13,11 +10,8 @@ const nowIso = () => new Date().toISOString();
 
 const isLocalId = (id?: string | null) => typeof id === "string" && id.startsWith("local_");
 
-// ---------------------------------------------------------------------------
-// Mapa de ids: local_xxx  ->  id definitivo do servidor
-// ---------------------------------------------------------------------------
 
-/** Registra que um id local passou a ser um id definitivo do servidor. */
+
 export function mapLocalId(localId: string, serverId: string, entity?: string) {
   if (!localId || !serverId || localId === serverId) return;
   db.runSync(
@@ -27,18 +21,13 @@ export function mapLocalId(localId: string, serverId: string, entity?: string) {
   );
 }
 
-/**
- * Traduz um id (que pode ser antigo/local) pro id válido de hoje.
- * Se não for local, ou se ainda não tiver sincronizado, devolve ele mesmo.
- * É seguro chamar em qualquer lugar — é o que faz telas abertas com um id
- * antigo continuarem funcionando depois que a sincronização acontece.
- */
+
 export function resolveId(id?: string | number | null): string {
   if (id === null || id === undefined) return "";
   let current = String(id).trim();
   if (!current) return "";
 
-  // Segue a cadeia (no máximo 5 saltos, só por segurança contra loop).
+
   for (let i = 0; i < 5 && isLocalId(current); i++) {
     const row = db.getFirstSync<{ server_id: string }>(`SELECT server_id FROM id_map WHERE local_id = ?`, [current]);
     if (!row?.server_id) break;
@@ -47,7 +36,7 @@ export function resolveId(id?: string | number | null): string {
   return current;
 }
 
-/** Troca todos os ids locais conhecidos dentro de um objeto de payload. */
+
 export function resolveIdsInPayload(payload: Record<string, any>): Record<string, any> {
   const out = { ...payload };
   for (const key of ["id_fazenda", "id_animal", "id_medicao"]) {
@@ -58,25 +47,15 @@ export function resolveIdsInPayload(payload: Record<string, any>): Record<string
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Imagens: nunca perder a foto escolhida pelo usuário
-// ---------------------------------------------------------------------------
 
-/**
- * Junta o registro que veio do servidor com o que já existia no celular,
- * preservando `localImageUri` (o arquivo de foto guardado no aparelho).
- *
- * Sem isso, assim que a fazenda/animal sincronizava, o pull do servidor
- * sobrescrevia o registro local e a foto sumia — o app voltava pra imagem
- * padrão sempre que o celular estivesse sem internet.
- */
+
 function mergeKeepingLocalImage(incoming: any, existingJson?: string | null) {
   if (!existingJson) return incoming;
   try {
     const existing = JSON.parse(existingJson);
     const merged: any = { ...existing, ...incoming };
     if (existing.localImageUri) merged.localImageUri = existing.localImageUri;
-    // Se o servidor não devolveu imagem, mantém o que já tínhamos.
+
     if (!merged.imagem && existing.imagem) merged.imagem = existing.imagem;
     return merged;
   } catch {
@@ -84,9 +63,6 @@ function mergeKeepingLocalImage(incoming: any, existingJson?: string | null) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Fazendas
-// ---------------------------------------------------------------------------
 
 export function upsertFazendas(list: any[]) {
   const now = nowIso();
@@ -112,7 +88,7 @@ export function getFazendas(): any[] {
   return rows.map((r) => JSON.parse(r.dados_json));
 }
 
-/** Busca uma fazenda pelo id — aceitando id antigo/local (resolve sozinho). */
+
 export function getFazendaById(id?: string | number | null): any | null {
   const realId = resolveId(id);
   if (!realId) return null;
@@ -155,9 +131,6 @@ export function deleteFazendaLocally(id: string) {
   removeOperationsByLocalId(String(id));
 }
 
-// ---------------------------------------------------------------------------
-// Animais
-// ---------------------------------------------------------------------------
 
 export function upsertAnimais(list: any[]) {
   const now = nowIso();
@@ -170,9 +143,9 @@ export function upsertAnimais(list: any[]) {
       [id]
     );
 
-    // Se o servidor não mandar id_fazenda nessa listagem, preserva o que já
-    // estava salvo local — senão o animal "perde a fazenda" e some do rebanho
-    // e da tela de medição.
+
+
+
     const incomingFarmId =
       item.id_fazenda ?? item.fazenda_id ?? item.fazenda?.id_fazenda ?? item.fazenda?.id ?? null;
     const idFazenda =
@@ -194,13 +167,13 @@ export function upsertAnimais(list: any[]) {
   }
 }
 
-/** Animais de uma fazenda — aceita id antigo/local (resolve sozinho). */
+
 export function getAnimaisByFazenda(idFazenda: string): any[] {
   const realId = resolveId(idFazenda);
   if (!realId) return [];
 
-  // Aceita tanto o id atual quanto qualquer id local que já tenha virado ele.
-  // Cobre registros gravados antes da tradução existir.
+
+
   const aliases = db
     .getAllSync<{ local_id: string }>(`SELECT local_id FROM id_map WHERE server_id = ?`, [realId])
     .map((r) => r.local_id);
@@ -229,8 +202,8 @@ export function getAnimalById(id: string): any | null {
 
 export function saveAnimalLocally(animal: any, localId: string, idFazenda: string) {
   const now = nowIso();
-  // Traduz o id da fazenda: a tela pode ter sido aberta com um id local que
-  // já virou id do servidor enquanto o usuário preenchia o formulário.
+
+
   const realFarmId = resolveId(idFazenda);
   db.runSync(
     `INSERT INTO animais (id_animal, id_fazenda, dados_json, synced, updated_at)
@@ -270,11 +243,7 @@ export function deleteAnimalLocally(id: string) {
   removeOperationsByLocalId(String(id));
 }
 
-/**
- * Troca um id local (temporário) pelo id definitivo do servidor, em todas as
- * tabelas relacionadas — e registra a tradução no id_map, pra que telas já
- * abertas segurando o id antigo continuem funcionando.
- */
+
 export function replaceLocalAnimalId(localId: string, serverId: string) {
   if (!localId || !serverId || localId === serverId) return;
   const row = db.getFirstSync<{ dados_json: string; id_fazenda: string }>(
@@ -295,7 +264,7 @@ export function replaceLocalAnimalId(localId: string, serverId: string) {
       ]);
     }
 
-    // Medições e notificações que apontavam pro id antigo.
+
     db.runSync(`UPDATE medicoes SET id_animal = ? WHERE id_animal = ?`, [serverId, localId]);
     db.runSync(
       `UPDATE medicoes SET dados_json = REPLACE(dados_json, ?, ?) WHERE id_animal = ? AND dados_json LIKE ?`,
@@ -303,7 +272,7 @@ export function replaceLocalAnimalId(localId: string, serverId: string) {
     );
     db.runSync(`UPDATE notificacoes SET id_animal = ? WHERE id_animal = ?`, [serverId, localId]);
 
-    // Operações ainda na fila que carregam o id antigo no corpo/endpoint.
+
     db.runSync(`UPDATE outbox SET payload_json = REPLACE(payload_json, ?, ?) WHERE payload_json LIKE ?`, [
       localId,
       serverId,
@@ -327,12 +296,7 @@ export function replaceLocalAnimalId(localId: string, serverId: string) {
   }
 }
 
-/**
- * Mesma ideia, para fazendas. Essencial pro caso "cadastrei a fazenda e logo
- * em seguida um animal dela": propaga o id definitivo pros animais (coluna E
- * dentro do dados_json — faltava o dados_json antes, e era por isso que o
- * animal sumia da lista da fazenda depois de sincronizar).
- */
+
 export function replaceLocalFazendaId(localId: string, serverId: string) {
   if (!localId || !serverId || localId === serverId) return;
   const row = db.getFirstSync<{ dados_json: string }>(`SELECT dados_json FROM fazendas WHERE id_fazenda = ?`, [localId]);
@@ -378,9 +342,6 @@ export function replaceLocalFazendaId(localId: string, serverId: string) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Medições
-// ---------------------------------------------------------------------------
 
 export function upsertMedicoes(list: any[]) {
   const now = nowIso();
@@ -470,9 +431,6 @@ export function replaceLocalMedicaoId(localId: string, serverId: string) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Notificações
-// ---------------------------------------------------------------------------
 
 const TEMP_LIMITE_BAIXO = 34;
 const TEMP_LIMITE_ALTO = 38.7;
@@ -519,16 +477,8 @@ export function deleteNotification(id: string) {
   db.runSync(`DELETE FROM notificacoes WHERE id = ?`, [id]);
 }
 
-// ---------------------------------------------------------------------------
-// Logout
-// ---------------------------------------------------------------------------
 
-/**
- * Apaga TUDO que está salvo no aparelho. Só é chamado quando o usuário clica
- * em "Sair" de propósito (auth.signOut) — nunca por perda de conexão, nunca
- * por erro do servidor, nunca ao fechar o app. Existe pra que o próximo
- * usuário que logar nesse celular não veja o rebanho do anterior.
- */
+
 export function clearLocalData() {
   db.execSync(`
     DELETE FROM outbox;

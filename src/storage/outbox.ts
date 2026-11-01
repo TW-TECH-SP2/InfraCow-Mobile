@@ -24,7 +24,7 @@ type EnqueueParams = {
   imageField?: string | null;
 };
 
-/** Enfileira uma operação que precisa ser replicada pro servidor assim que houver conexão. */
+
 export function enqueueOperation({
   entity,
   localId,
@@ -55,14 +55,12 @@ export function incrementAttempts(id: string) {
   db.runSync(`UPDATE outbox SET attempts = attempts + 1 WHERE id = ?`, [id]);
 }
 
-/** Remove todas as operações pendentes de um registro (usado ao deletar
- * localmente: se o registro some, não faz sentido continuar tentando
- * criar/atualizar ele no servidor). */
+
 export function removeOperationsByLocalId(localId: string) {
   db.runSync(`DELETE FROM outbox WHERE local_id = ?`, [localId]);
 }
 
-/** Operação de criação (POST) ainda não sincronizada pra um id local, se existir. */
+
 export function findPendingCreateOperation(localId: string): OutboxOperation | null {
   return (
     db.getFirstSync<OutboxOperation>(
@@ -72,15 +70,7 @@ export function findPendingCreateOperation(localId: string): OutboxOperation | n
   );
 }
 
-/**
- * Atualiza os dados (e a imagem, se uma nova foi escolhida) de uma operação
- * de criação (POST) ainda pendente. Usada quando o usuário edita um registro
- * criado offline que ainda não sincronizou: em vez de enfileirar um PUT pra
- * um id que o servidor nem conhece ainda, a gente só atualiza o que vai ser
- * enviado quando o POST original finalmente sincronizar.
- * Retorna false se não havia criação pendente pra esse id (o chamador deve
- * então tratar como uma edição normal, via PUT).
- */
+
 export function updatePendingCreatePayload(
   localId: string,
   patch: Record<string, any>,

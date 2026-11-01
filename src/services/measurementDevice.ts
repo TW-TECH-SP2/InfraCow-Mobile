@@ -18,6 +18,10 @@ type EspResponse = { leituras: EspReading[] };
 
 const BAUD_RATE = 115200;
 
+const SIMULAR_MEDICAO = true;
+const SIM_MIN = 36.0;
+const SIM_MAX = 38.0;
+
 const BOOT_WAIT_MS = 2500;
 const CONNECT_TIMEOUT_MS = 30000;
 const MEASUREMENT_TIMEOUT_MS = 8000;
@@ -26,7 +30,7 @@ const RESEND_EVERY_MS = 1500;
 const serialport = new Serialport();
 
 let activeDeviceId = -1;
-let activePortInterface = -1; // interface que a biblioteca abriu (vem no evento onConnected)
+let activePortInterface = -1;
 let connected = false;
 let listenerStarted = false;
 
@@ -40,7 +44,6 @@ type Waiter = {
 let waiter: Waiter | null = null;
 let busy = false;
 
-// Diagnóstico
 const trail: string[] = [];
 let trailStart = Date.now();
 let rxBytes = 0;
@@ -143,7 +146,6 @@ function sleep(ms: number) {
 }
 
 async function ensureConnected(): Promise<void> {
-  // 🔧 LOG: lista todos os dispositivos USB vistos pelo Android
   const devices = await serialport.listDevices();
   console.log("[USB devices]", JSON.stringify(devices));
 
@@ -152,8 +154,6 @@ async function ensureConnected(): Promise<void> {
     throw new Error("Nenhum dispositivo USB encontrado.");
   }
 
-  // 🔧 Se houver mais de um, tenta escolher o que parece ser o ESP.
-  // ESP32-S3: vendorId 0x303A (12346); CP2102: 0x10C4 (4292); CH340: 0x1A86 (6790)
   const espVendorIds = [12346, 4292, 6790];
   const espDevice =
     devices.find((d: any) => {
@@ -218,9 +218,6 @@ async function ensureConnected(): Promise<void> {
   lineBuffer = "";
 }
 
-// Escreve "MEDIR\n" na mesma interface que a biblioteca abriu.
-// (writeString retorna void; o antigo "fallback byte a byte" sempre disparava
-// e mandava o comando duas vezes.)
 function writeMedirCommand(): void {
   try {
     serialport.writeString("MEDIR\n", activeDeviceId, activePortInterface);
@@ -295,8 +292,6 @@ function requestMeasurement(): Promise<MeasurementResult> {
       return;
     }
 
-    // Se a placa ainda estava iniciando, o primeiro MEDIR se perde: reenvia
-    // até chegar a resposta (o firmware responde a cada MEDIR, é inofensivo).
     resend = setInterval(() => {
       if (settled) return;
       try {
@@ -307,7 +302,14 @@ function requestMeasurement(): Promise<MeasurementResult> {
   });
 }
 
+async function simulateMeasurement(): Promise<MeasurementResult> {
+  await sleep(1500);
+  const temperature = Number((SIM_MIN + Math.random() * (SIM_MAX - SIM_MIN)).toFixed(1));
+  return { temperature, ...classifyTemperature(temperature) };
+}
+
 export async function startUsbMeasurement(): Promise<MeasurementResult> {
+  if (SIMULAR_MEDICAO) return simulateMeasurement();
   if (busy) throw new Error("Já existe uma medição em andamento.");
   busy = true;
   try {

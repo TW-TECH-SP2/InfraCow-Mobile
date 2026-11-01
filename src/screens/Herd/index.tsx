@@ -74,17 +74,17 @@ export default function HerdScreen() {
   const farmFromRoute = route.params?.farm ?? null;
   const farmIdValue = farmFromRoute?.id_fazenda ?? farmFromRoute?.id ?? null;
 
-  // resolveId traduz um id local que já virou id definitivo do servidor.
-  // Sem isso, esta tela aberta logo após o cadastro da fazenda ficava com um
-  // id antigo e não encontrava mais nem a fazenda nem os animais dela.
+
+
+
   const farmId = resolveId(farmIdValue);
 
-  // Lê fazenda + animais direto do SQLite local — funciona offline e
-  // já mostra animais cadastrados em campo que ainda não sincronizaram.
+
+
   const loadFromLocal = useCallback(() => {
     try {
-      // Relê a fazenda do banco local: assim o nome e a FOTO ficam sempre
-      // atualizados (inclusive a foto escolhida no cadastro offline).
+
+
       const displayFarm = getFazendaById(farmId) ?? farmFromRoute;
       setHeaderFarm(displayFarm);
       setHeaderImageSource(
@@ -99,8 +99,8 @@ export default function HerdScreen() {
     }
   }, [farmId, farmFromRoute]);
 
-  // Mostra o que já está salvo local na hora, sincroniza em paralelo, e
-  // relê quando terminar. Sem internet, fica só no que já tinha local.
+
+
   const loadAnimals = useCallback(async () => {
     setLoadingAnimals(true);
     loadFromLocal();
@@ -123,12 +123,12 @@ export default function HerdScreen() {
       setDeletingAnimalId(animalId);
       setAnimals((prev) => prev.filter((a) => String(a.id_animal ?? a.id) !== animalId));
 
-      // Remove local na hora — animal, medições e notificações dele, e
-      // cancela qualquer operação pendente no outbox.
+
+
       deleteAnimalLocally(animalId);
 
       if (!isLocalOnly) {
-        // Só existe no servidor se não for um id local que nunca sincronizou.
+
         enqueueOperation({
           entity: 'animal',
           localId: animalId,

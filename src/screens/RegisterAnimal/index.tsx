@@ -35,9 +35,9 @@ export default function RegisterAnimal() {
   const routeFarm = route.params?.farm;
   const rawFarmId = routeFarm?.id_fazenda ?? routeFarm?.id ?? null;
 
-  // resolveId traduz um id local que já virou id do servidor. Sem isso, um
-  // animal cadastrado logo depois da fazenda ficava amarrado a um id que não
-  // existia mais: sumia do rebanho e o POST /animais era recusado.
+
+
+
   const farmId = resolveId(rawFarmId);
   const farmAtual = getFazendaById(farmId) ?? routeFarm;
   const farmName = farmAtual?.nome_fazenda ?? farmAtual?.name ?? '';
@@ -116,8 +116,8 @@ export default function RegisterAnimal() {
     try {
       const localImageUri = imageAsset?.localUri ?? imageAsset?.uri ?? null;
 
-      // Vai pro servidor. O id_fazenda é resolvido de novo aqui porque a
-      // fazenda pode ter sincronizado enquanto o formulário estava aberto.
+
+
       const animalPayload = {
         nome_animal: name,
         codigo,
@@ -129,8 +129,8 @@ export default function RegisterAnimal() {
         id_fazenda: resolveId(farmId),
       };
 
-      // Fica no celular — agora COM a foto escolhida (imagem + localImageUri),
-      // que é o que o Rebanho e a tela de medição usam pra exibir o card.
+
+
       const localId = generateLocalId('animal');
       const registroLocal = {
         ...animalPayload,

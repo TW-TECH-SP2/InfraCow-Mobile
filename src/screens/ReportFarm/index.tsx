@@ -113,8 +113,8 @@ export default function ReportFarm() {
     load();
   }, [route.params]);
 
-  // Animal sem medição vem com temp = 0: não conta como medido, não entra na
-  // média e não gera alerta.
+
+
   const comMedicao = animals.filter((a) => a.temp > 0);
   const measured = comMedicao.length;
 

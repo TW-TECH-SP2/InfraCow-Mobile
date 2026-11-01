@@ -66,7 +66,7 @@ async function viaFetch(uri: string): Promise<string> {
   if (!dataUri.startsWith("data:") || dataUri.length < 40) throw new Error("conteúdo inválido");
   if (/^data:image\//i.test(dataUri)) return dataUri;
 
-  // Blob sem tipo vem como application/octet-stream: força o tipo da imagem.
+
   return dataUri.replace(/^data:[^;,]*/, `data:${mimePorExtensao(uri)}`);
 }
 

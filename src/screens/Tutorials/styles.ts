@@ -70,8 +70,8 @@ play: {
   height: 50,
 },
 
-  // ---- player do YouTube ----
-  // Os vídeos são Shorts (vertical): altura maior quando está tocando.
+
+
   imageWrapperPlaying: {
     height: 440,
     backgroundColor: "#000",
