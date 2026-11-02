@@ -18,16 +18,14 @@ type EspResponse = { leituras: EspReading[] };
 
 const BAUD_RATE = 115200;
 
-// true  = temperatura simulada (sem ESP32 / sensor)
-// false = lê o sensor MLX90614 de verdade via USB
+
 const SIMULAR_MEDICAO = false;
 const SIM_MIN = 35.0;
 const SIM_MAX = 37.0;
 
 const BOOT_WAIT_MS = 2500;
 const CONNECT_TIMEOUT_MS = 30000;
-// O ESP32 leva ~3 s medindo (TEMPO_MEDICAO_MS no .ino) antes de responder,
-// então o timeout e o reenvio precisam ser maiores que isso.
+
 const MEASUREMENT_TIMEOUT_MS = 12000;
 const RESEND_EVERY_MS = 4500;
 
