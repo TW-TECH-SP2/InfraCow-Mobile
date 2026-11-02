@@ -1,5 +1,6 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ImageSourcePropType, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, Alert, ImageSourcePropType, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
+import FormScrollView from "../../components/FormScrollView";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
@@ -164,7 +165,7 @@ export default function EditFarm() {
 
   return (
     <View style={{ flex: 1 }}>
-      <ScrollView
+      <FormScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}
@@ -227,7 +228,7 @@ export default function EditFarm() {
             }
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </FormScrollView>
 
       <Navbar />
     </View>

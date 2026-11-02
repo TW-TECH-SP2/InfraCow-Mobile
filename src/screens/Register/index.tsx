@@ -1,5 +1,6 @@
 import { View, Image, TextInput, TouchableOpacity, Alert } from "react-native";
 import Text from "../../components/Text";
+import FormScrollView from "../../components/FormScrollView";
 import { useState, useEffect } from "react";
 import styles from "./styles";
 import auth from "../../services/auth";
@@ -66,12 +67,13 @@ export default function RegisterScreen({ navigation }: any) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.root}>
       <Image
         source={require("../../../assets/back-fomuser.png")}
         style={styles.backgroundformuser}
       />
 
+      <FormScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <View style={styles.topContent}>
         <TouchableOpacity onPress={() => navigation.navigate("Auth")}>
           <Image
@@ -143,6 +145,7 @@ export default function RegisterScreen({ navigation }: any) {
           <Text style={styles.buttonText}>{loading ? 'Cadastrando...' : 'Cadastrar'}</Text>
         </TouchableOpacity>
       </View>
+      </FormScrollView>
     </View>
   );
 }

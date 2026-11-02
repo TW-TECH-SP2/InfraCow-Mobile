@@ -2,8 +2,12 @@ import { StyleSheet } from "react-native";
 import { fonts } from '../../styles/fonts';
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    overflow: "hidden",
+  },
   container: {
-  flex: 1,
+  flexGrow: 1,
   alignItems: "center",
   justifyContent: "center", 
   padding: 20,

@@ -1,5 +1,6 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, ImageSourcePropType, Alert, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, ImageSourcePropType, Alert, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
+import FormScrollView from "../../components/FormScrollView";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
@@ -162,7 +163,7 @@ export default function EditAnimal() {
   };
 
   return (
-    <ScrollView
+    <FormScrollView
       contentContainerStyle={{ flexGrow: 1 }}
       showsVerticalScrollIndicator={false}
     >
@@ -333,6 +334,6 @@ export default function EditAnimal() {
           </TouchableOpacity>
         </View>
       </View>
-    </ScrollView>
+    </FormScrollView>
   );
 }

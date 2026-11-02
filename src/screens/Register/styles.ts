@@ -2,10 +2,15 @@ import { StyleSheet } from "react-native";
 
 import { fonts } from '../../styles/fonts';
 const styles = StyleSheet.create({
-container: {
+root: {
   flex: 1,
+},
+
+container: {
+  flexGrow: 1,
   paddingHorizontal: 25,
   paddingTop: 60,
+  paddingBottom: 40,
 },
 
 topContent: {

@@ -1,5 +1,6 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
+import FormScrollView from "../../components/FormScrollView";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
@@ -161,7 +162,7 @@ export default function RegisterAnimal() {
   };
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+    <FormScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
       <View style={styles.container}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.close}>
           <Text style={styles.closeText}>✕</Text>
@@ -277,6 +278,6 @@ export default function RegisterAnimal() {
           </TouchableOpacity>
         </View>
       </View>
-    </ScrollView>
+    </FormScrollView>
   );
 }

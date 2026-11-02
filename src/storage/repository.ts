@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { removeOperationsByLocalId } from "./outbox";
+import { getAlertType } from "../utils/temperatureStatus";
 
 
 export function generateLocalId(prefix: string) {
@@ -432,20 +433,17 @@ export function replaceLocalMedicaoId(localId: string, serverId: string) {
 }
 
 
-const TEMP_LIMITE_BAIXO = 34;
-const TEMP_LIMITE_ALTO = 38.7;
-
 export function maybeCreateNotification(medicao: any) {
   const temp = Number(medicao.temp ?? medicao.temperatura);
   if (Number.isNaN(temp)) return;
-  if (temp > TEMP_LIMITE_BAIXO && temp < TEMP_LIMITE_ALTO) return;
+  const tipo = getAlertType(temp);
+  if (!tipo) return;
 
   const idMedicao = String(medicao.id_medicao ?? medicao.id ?? "");
   if (!idMedicao) return;
 
   const idAnimal = medicao.id_animal != null ? resolveId(medicao.id_animal) : "";
   const animal = idAnimal ? getAnimalById(idAnimal) : null;
-  const tipo = temp <= TEMP_LIMITE_BAIXO ? "low" : "high";
   const mensagem =
     tipo === "low"
       ? "Apresentou HIPOTERMIA em sua última medição! Procure um veterinário!"

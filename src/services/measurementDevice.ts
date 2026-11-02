@@ -19,8 +19,8 @@ type EspResponse = { leituras: EspReading[] };
 const BAUD_RATE = 115200;
 
 const SIMULAR_MEDICAO = true;
-const SIM_MIN = 36.0;
-const SIM_MAX = 38.0;
+const SIM_MIN = 35.0;
+const SIM_MAX = 37.0;
 
 const BOOT_WAIT_MS = 2500;
 const CONNECT_TIMEOUT_MS = 30000;
