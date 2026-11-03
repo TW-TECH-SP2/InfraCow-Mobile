@@ -106,6 +106,32 @@ Este projeto utiliza:
 * **React DOM** - suporte para web
 
 ---
+### Simulação de medição (para avaliação sem o dispositivo IoT)
+
+Para realizar a avaliação do aplicativo sem a necessidade de possuir o dispositivo IoT (ESP32 + sensor de temperatura), o projeto disponibiliza um **modo de simulação de medições**.
+
+Antes de executar o aplicativo, siga os passos:
+
+1. Acesse o arquivo `src/services/measurementDevice.ts` (ou localize o arquivo `measurementDevice.ts` no projeto).
+2. Localize a constante `SIMULAR_MEDICAO`, próxima ao início do arquivo.
+3. Altere seu valor de `false` para `true`:
+
+```typescript
+const SIMULAR_MEDICAO = true;
+```
+
+4. Salve o arquivo e execute o aplicativo normalmente.
+
+**Como funciona a simulação?**
+
+- Não é necessário conectar a placa ESP32 ou o sensor físico.
+- Ao solicitar uma medição, o sistema gera automaticamente uma temperatura simulada após um breve intervalo.
+- Os valores são gerados aleatoriamente, contemplando diferentes condições: temperatura abaixo do esperado, normal, atenção e febre.
+- Os resultados são apresentados no aplicativo seguindo a mesma classificação e lógica visual utilizadas nas medições reais.
+
+**Importante:** Após a avaliação, caso deseje utilizar o dispositivo IoT físico, altere novamente `SIMULAR_MEDICAO` para `false`. Dessa forma, o aplicativo voltará a buscar as leituras reais por meio da conexão USB com o dispositivo.
+
+---
 
 ### 🎯 Resumo dos comandos
 

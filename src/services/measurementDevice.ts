@@ -23,8 +23,8 @@ type EspResponse = { leituras: EspReading[] };
 
 const BAUD_RATE = 115200;
 
-
-const SIMULAR_MEDICAO = true;
+// PROFESSOR, SIMULE AQUI , COLOQUE IGUAL A TRUE!!
+const SIMULAR_MEDICAO = false;
 const SIM_RANGES: [number, number][] = [
   [TEMP_LOW_MAX - 1, TEMP_LOW_MAX],                 // hipotermia 
   [TEMP_LOW_MAX + 0.1, TEMP_ATTENTION_MIN - 0.1],   // normal 
