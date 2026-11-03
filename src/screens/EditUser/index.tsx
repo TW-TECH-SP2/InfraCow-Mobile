@@ -4,11 +4,11 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
-  ScrollView,
   Text,
   Platform,
 } from "react-native";
 import { useEffect, useState } from "react";
+import FormScrollView from "../../components/FormScrollView";
 import styles from "./styles";
 import * as ImagePicker from 'expo-image-picker';
 import auth from "../../services/auth";
@@ -138,7 +138,7 @@ export default function EditScreen({ navigation }: any) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <FormScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <Image source={require("../../../assets/back-fomuser.png")} style={styles.backgroundformuser} />
 
       <View style={styles.rowlogo}>
@@ -176,6 +176,6 @@ export default function EditScreen({ navigation }: any) {
           <Text style={styles.buttonText}>{loading ? "Atualizando..." : "Atualizar"}</Text>
         </TouchableOpacity>
       </View>
-    </ScrollView>
+    </FormScrollView>
   );
 }

@@ -81,14 +81,14 @@ export default function AnimalScreen() {
     setHeaderImageSource(resolveAnimalImage(animalImage));
   }, [animalImage]);
 
-  // Lê as medições do animal direto do SQLite local — funciona sem
-  // internet, tanto pra "última medição" quanto pro gráfico do período.
+
+
   const loadUltimaMedicaoFromLocal = () => {
     const animalId = animal?.id_animal ?? animal?.id ?? null;
     if (!animalId) return;
     const medicoesDoAnimal = getMedicoesByAnimal(String(animalId));
     if (medicoesDoAnimal.length > 0) {
-      const ultima = medicoesDoAnimal[0]; // getMedicoesByAnimal já ordena por datahora DESC
+      const ultima = medicoesDoAnimal[0];
       setUltimaMedicao(Number(ultima.temp));
       const d = new Date(ultima.datahora);
       setDataUltimaMedicao(
@@ -144,8 +144,8 @@ export default function AnimalScreen() {
     }
   };
 
-  // Ao focar a tela, mostra o que já está local na hora e sincroniza em
-  // segundo plano (se houver conexão); quando terminar, relê do local.
+
+
   useEffect(() => {
     loadUltimaMedicaoFromLocal();
     loadMedicoesPorPeriodoFromLocal();
@@ -180,8 +180,8 @@ export default function AnimalScreen() {
 
     setLoadingDelete(true);
     try {
-      // Remove local na hora — animal, medições e notificações dele, e
-      // cancela qualquer operação pendente no outbox.
+
+
       deleteAnimalLocally(animalId);
 
       if (!isLocalOnly) {

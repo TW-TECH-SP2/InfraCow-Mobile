@@ -176,9 +176,9 @@ export default function FarmScreen() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [loadingDelete, setLoadingDelete] = useState(false);
 
-  // Lê animais e medições direto do SQLite local — os números da tela
-  // (total/fêmeas/machos/temperatura média) refletem o que está salvo no
-  // celular, com ou sem internet.
+
+
+
   const loadFromLocal = useCallback(() => {
     if (!farmId) return;
 
@@ -200,8 +200,8 @@ export default function FarmScreen() {
 
       setHeaderSource(getImageUrl(paramFarm?.imagem));
 
-      // getMedicoesByAnimal já existe no repository — só juntar as medições
-      // de cada animal da fazenda.
+
+
       const farmMeasurements = farmAnimals.flatMap((a: any) => getMedicoesByAnimal(getAnimalId(a)));
 
       let avgTemp = null;
@@ -220,8 +220,8 @@ export default function FarmScreen() {
     }
   }, [farmId, paramFarm]);
 
-  // Mostra o que já está salvo local na hora, sincroniza em paralelo
-  // (baixa o que há de novo do servidor + envia pendências) e relê.
+
+
   const loadFarm = useCallback(async () => {
     if (!farmId) return;
     loadFromLocal();
@@ -247,13 +247,13 @@ export default function FarmScreen() {
 
     setLoadingDelete(true);
     try {
-      // Remove local na hora — fazenda, animais, medições e notificações
-      // dela, e cancela qualquer operação pendente no outbox (deletar
-      // precisa funcionar sem internet, igual o resto do app).
+
+
+
       deleteFazendaLocally(id);
 
       if (!isLocalOnly) {
-        // Só existe no servidor se não for um id local que nunca sincronizou.
+
         enqueueOperation({
           entity: 'fazenda',
           localId: id,

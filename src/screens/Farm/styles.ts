@@ -12,7 +12,7 @@ headerImage: {
   height: 350,
   padding: 20,
   justifyContent: "space-between",
-  width, // 👈 aqui resolve de vez
+  width,
 
   borderBottomLeftRadius: 25,
   borderBottomRightRadius: 25,
@@ -25,7 +25,7 @@ headerImageRadius:{
 },
 overlay: {
   ...StyleSheet.absoluteFill,
-  backgroundColor: "rgba(255, 255, 255, 0.42)", // 👈 bem mais leve
+  backgroundColor: "rgba(255, 255, 255, 0.42)",
   borderBottomLeftRadius: 25,
   borderBottomRightRadius: 25,
 },
@@ -182,14 +182,14 @@ temperatureContainer: {
 
 temperatureIcon: {
   width: "90%",
-  height: 200, // 👈 FIXA ISSO (ou valor proporcional ao design)
+  height: 200,
   resizeMode: "contain",
 },
 
 temperatureText: {
   position: "absolute",
-  top: "50%",                  // 👈 vai pro meio vertical
-  transform: [{ translateY: -20 }], // 👈 sobe metade do tamanho do texto
+  top: "50%",
+  transform: [{ translateY: -20 }],
 
   fontSize: 20,
   fontWeight: "bold",

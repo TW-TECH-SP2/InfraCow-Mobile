@@ -167,6 +167,10 @@ export default function MeasureScreen() {
           <Text style={styles.buttonText}>{getButtonText()}</Text>
         </TouchableOpacity>
 
+        <Text style={{ marginTop: 16, paddingHorizontal: 12, textAlign: "center", fontSize: 14, color: "#3B2F1B" }}>
+          {resultMessage}
+        </Text>
+
         {isFinished(status) && (
           <TouchableOpacity style={styles.retryContainer} onPress={handleRetry}>
             <Image source={require("../../../assets/retry.png")} style={styles.retryIcon} />

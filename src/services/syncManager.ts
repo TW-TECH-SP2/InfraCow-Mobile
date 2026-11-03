@@ -22,20 +22,14 @@ const MAX_ATTEMPTS = 5;
 let syncing = false;
 let listenerStarted = false;
 
-/**
- * A API do Infracow recebe fazenda e animal via multipart (multer), porque
- * essas rotas aceitam upload de imagem. Mandar JSON puro nelas fazia o
- * servidor responder erro e a operação era descartada depois de algumas
- * tentativas — era por isso que o animal nunca chegava na nuvem.
- * Medições não têm imagem e continuam em JSON.
- */
+
 const usesMultipart = (op: OutboxOperation) =>
   (op.entity === "fazenda" || op.entity === "animal") && op.method !== "delete";
 
-/** Monta o corpo da requisição: FormData pra fazenda/animal, JSON pro resto. */
+
 function buildRequestBody(op: OutboxOperation) {
-  // Traduz ids locais que já viraram ids do servidor (ex: o animal foi criado
-  // apontando pra "local_fazenda_123" e a fazenda já sincronizou como "57").
+
+
   const payload = resolveIdsInPayload(JSON.parse(op.payload_json));
 
   if (op.method === "delete") return undefined;
@@ -61,12 +55,12 @@ function buildRequestBody(op: OutboxOperation) {
   return form;
 }
 
-/** Endpoints como /animais/local_animal_123 precisam do id real antes de sair. */
+
 function resolveEndpoint(endpoint: string) {
   return endpoint.replace(/local_[A-Za-z]+_\d+_[a-z0-9]+/g, (match) => resolveId(match) || match);
 }
 
-/** Lê o id criado pelo servidor aceitando os formatos possíveis de resposta. */
+
 function extractServerId(data: any, entityKey: string, idKey: string): string | null {
   const candidates = [
     data?.[entityKey]?.[idKey],
@@ -82,11 +76,11 @@ function extractServerId(data: any, entityKey: string, idKey: string): string | 
   return null;
 }
 
-/** Processa a fila de operações pendentes, em ordem, uma por vez. */
+
 async function drainOutbox() {
-  // Reler do banco a cada volta: processar uma operação pode reescrever o
-  // payload de outra que ainda está na fila (a fazenda sincroniza e o animal
-  // logo atrás dela passa a ter o id_fazenda definitivo).
+
+
+
   let guard = 0;
   while (guard++ < 200) {
     const pending = getPendingOperations();
@@ -124,8 +118,8 @@ async function drainOutbox() {
       const isNetworkError = !error?.response;
 
       if (isNetworkError) {
-        // Sem conexão de verdade (ou servidor fora do ar): para por aqui e
-        // tenta de novo quando a conexão voltar, preservando a ordem da fila.
+
+
         break;
       }
 
@@ -143,8 +137,8 @@ async function drainOutbox() {
         console.warn("[sync] descartando operação após falhas repetidas:", op.endpoint);
         removeOperation(op.id);
       } else {
-        // Não descartou ainda: sai do loop pra não ficar martelando o servidor
-        // agora. A próxima sincronização tenta de novo.
+
+
         break;
       }
     }
@@ -177,14 +171,14 @@ async function pullFromServer() {
   if (medicoesResult.status === "fulfilled") upsertMedicoes(medicoesResult.value);
 }
 
-/** Ponto único de sincronização: envia o pendente, depois atualiza o cache local. */
+
 export async function runSync() {
   if (syncing) return;
   syncing = true;
   try {
     const net = await NetInfo.fetch();
-    // isInternetReachable pode vir null em alguns aparelhos — só consideramos
-    // "sem internet" quando for explicitamente false.
+
+
     if (!net.isConnected || net.isInternetReachable === false) return;
 
     await drainOutbox();
@@ -196,7 +190,7 @@ export async function runSync() {
   }
 }
 
-/** Chamar uma vez no boot do app. Sincroniza sempre que a conexão for restabelecida. */
+
 export function startSyncListener() {
   if (listenerStarted) return;
   listenerStarted = true;

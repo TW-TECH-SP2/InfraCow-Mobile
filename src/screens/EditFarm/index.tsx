@@ -1,5 +1,6 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ImageSourcePropType, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, Alert, ImageSourcePropType, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
+import FormScrollView from "../../components/FormScrollView";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
@@ -50,10 +51,10 @@ export default function EditFarm() {
   const [number, setNumber] = useState("");
 
   useEffect(() => {
-    // Lê os dados da fazenda direto do SQLite local — funciona sem
-    // internet. O registro local já tem tudo que a API retornaria (é
-    // mantido sincronizado pelo pullFromServer), então não precisa mais
-    // chamar /fazendas/:id.
+
+
+
+
     const applyFarmData = (source: any) => {
       setName(source.nome_fazenda ?? source.nome ?? source.name ?? "");
       setStreet(source.rua ?? source.street ?? source.endereco ?? "");
@@ -123,14 +124,14 @@ export default function EditFarm() {
       if (number) patch.numero = number;
       if (imageAsset?.localUri) patch.localImageUri = imageAsset.localUri;
 
-      // Atualiza o registro local na hora — a edição aparece na tela mesmo
-      // sem internet.
+
+
       updateFazendaLocally(lookupId, patch);
 
       if (lookupId.startsWith('local_')) {
-        // Fazenda ainda não sincronizou: atualiza o payload do POST
-        // pendente em vez de mandar um PUT pra um id que o servidor nem
-        // conhece ainda.
+
+
+
         updatePendingCreatePayload(
           lookupId,
           patch,
@@ -138,7 +139,7 @@ export default function EditFarm() {
           imageAsset?.localUri ? 'imagem' : undefined
         );
       } else {
-        // Já existe no servidor: enfileira um PUT.
+
         enqueueOperation({
           entity: 'fazenda',
           localId: lookupId,
@@ -164,7 +165,7 @@ export default function EditFarm() {
 
   return (
     <View style={{ flex: 1 }}>
-      <ScrollView
+      <FormScrollView
         style={styles.container}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}
@@ -227,7 +228,7 @@ export default function EditFarm() {
             }
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </FormScrollView>
 
       <Navbar />
     </View>

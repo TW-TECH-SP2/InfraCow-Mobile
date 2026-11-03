@@ -1,5 +1,6 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, ImageSourcePropType, Alert, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, ImageSourcePropType, Alert, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
+import FormScrollView from "../../components/FormScrollView";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
@@ -122,14 +123,14 @@ export default function EditAnimal() {
       if (idade) patch.idade = String(idade);
       if (imageAsset?.localUri) patch.localImageUri = imageAsset.localUri;
 
-      // Atualiza o registro local na hora — a edição aparece na tela mesmo
-      // sem internet.
+
+
       updateAnimalLocally(animalId, patch);
 
       if (animalId.startsWith('local_')) {
-        // Animal ainda não sincronizou: atualiza o payload do POST
-        // pendente em vez de mandar um PUT pra um id que o servidor nem
-        // conhece ainda.
+
+
+
         updatePendingCreatePayload(
           animalId,
           patch,
@@ -137,7 +138,7 @@ export default function EditAnimal() {
           imageAsset?.localUri ? 'imagem' : undefined
         );
       } else {
-        // Já existe no servidor: enfileira um PUT.
+
         enqueueOperation({
           entity: 'animal',
           localId: animalId,
@@ -162,7 +163,7 @@ export default function EditAnimal() {
   };
 
   return (
-    <ScrollView
+    <FormScrollView
       contentContainerStyle={{ flexGrow: 1 }}
       showsVerticalScrollIndicator={false}
     >
@@ -333,6 +334,6 @@ export default function EditAnimal() {
           </TouchableOpacity>
         </View>
       </View>
-    </ScrollView>
+    </FormScrollView>
   );
 }

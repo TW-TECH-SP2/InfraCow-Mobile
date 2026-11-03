@@ -1,5 +1,6 @@
-import { View, TextInput, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator } from "react-native";
+import { View, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator } from "react-native";
 import Text from "../../components/Text";
+import FormScrollView from "../../components/FormScrollView";
 import { useState, useEffect } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import styles from "./styles";
@@ -35,9 +36,9 @@ export default function RegisterAnimal() {
   const routeFarm = route.params?.farm;
   const rawFarmId = routeFarm?.id_fazenda ?? routeFarm?.id ?? null;
 
-  // resolveId traduz um id local que já virou id do servidor. Sem isso, um
-  // animal cadastrado logo depois da fazenda ficava amarrado a um id que não
-  // existia mais: sumia do rebanho e o POST /animais era recusado.
+
+
+
   const farmId = resolveId(rawFarmId);
   const farmAtual = getFazendaById(farmId) ?? routeFarm;
   const farmName = farmAtual?.nome_fazenda ?? farmAtual?.name ?? '';
@@ -116,8 +117,8 @@ export default function RegisterAnimal() {
     try {
       const localImageUri = imageAsset?.localUri ?? imageAsset?.uri ?? null;
 
-      // Vai pro servidor. O id_fazenda é resolvido de novo aqui porque a
-      // fazenda pode ter sincronizado enquanto o formulário estava aberto.
+
+
       const animalPayload = {
         nome_animal: name,
         codigo,
@@ -129,8 +130,8 @@ export default function RegisterAnimal() {
         id_fazenda: resolveId(farmId),
       };
 
-      // Fica no celular — agora COM a foto escolhida (imagem + localImageUri),
-      // que é o que o Rebanho e a tela de medição usam pra exibir o card.
+
+
       const localId = generateLocalId('animal');
       const registroLocal = {
         ...animalPayload,
@@ -161,7 +162,7 @@ export default function RegisterAnimal() {
   };
 
   return (
-    <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+    <FormScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
       <View style={styles.container}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.close}>
           <Text style={styles.closeText}>✕</Text>
@@ -169,7 +170,6 @@ export default function RegisterAnimal() {
         <Image source={require("../../../assets/logoescura 1.png")} style={styles.logo} />
         <View style={styles.formContainer}>
           <Text style={styles.title}>Cadastro de Animal</Text>
-          {farmName ? <Text style={{ color: '#aaa', fontSize: 13, marginBottom: 8, textAlign: 'center' }}>Fazenda: {farmName}</Text> : null}
 
           <Text style={styles.inputLabel}>Nome do Animal: *</Text>
           <TextInput style={styles.input} value={name} placeholder="Ex.: Mimosa" placeholderTextColor="#D3D3D3" onChangeText={setName} editable={!loading} />
@@ -278,6 +278,6 @@ export default function RegisterAnimal() {
           </TouchableOpacity>
         </View>
       </View>
-    </ScrollView>
+    </FormScrollView>
   );
 }

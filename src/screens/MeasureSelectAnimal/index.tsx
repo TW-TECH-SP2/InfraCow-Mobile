@@ -68,8 +68,8 @@ export default function MeasureSelectAnimal() {
   const [loadingAnimals, setLoadingAnimals] = useState(true);
   const navigation = useNavigation<any>();
 
-  // Lê os animais direto do SQLite local — funciona sem internet e já
-  // mostra animais cadastrados em campo que ainda não sincronizaram.
+
+
   const loadFromLocal = useCallback(() => {
     try {
       const filtered = farmId ? getAnimaisByFazenda(farmId) : getAllAnimais();
@@ -80,9 +80,9 @@ export default function MeasureSelectAnimal() {
     }
   }, [farmId]);
 
-  // Mostra o que já está salvo local na hora, sincroniza em paralelo (se
-  // houver conexão), e relê quando terminar. Sem internet, fica só no que
-  // já tinha local — é exatamente o fluxo que precisa funcionar no pasto.
+
+
+
   const loadAnimals = useCallback(async () => {
     setLoadingAnimals(true);
     loadFromLocal();
