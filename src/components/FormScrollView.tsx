@@ -15,24 +15,9 @@ import {
 } from "react-native";
 
 type Props = ScrollViewProps & {
-  /** Estilo do container externo (o que envolve o ScrollView). */
   containerStyle?: StyleProp<ViewStyle>;
-  /** Folga (px) entre o campo focado e o topo do teclado. */
   focusMargin?: number;
 };
-
-/**
- * ScrollView para formulários.
- *
- * Quando o teclado abre, ele cobre a parte de baixo da tela (em Android com
- * edge-to-edge a janela nem é redimensionada). Este componente mede quanto o
- * teclado realmente cobre o ScrollView e adiciona esse espaço no final do
- * conteúdo, permitindo rolar os campos de baixo para cima do teclado. Também
- * rola automaticamente até o campo que está em foco.
- *
- * Se o sistema já redimensionar a janela sozinho (sem sobreposição), nenhum
- * espaço extra é adicionado, evitando compensação em dobro.
- */
 const FormScrollView = forwardRef<ScrollView, Props>(function FormScrollView(
   {
     children,
@@ -87,12 +72,10 @@ const FormScrollView = forwardRef<ScrollView, Props>(function FormScrollView(
       const kbTop = e.endCoordinates.screenY;
       keyboardTop.current = kbTop;
 
-      // Mede o quanto o teclado realmente cobre este ScrollView.
       setTimeout(() => {
         containerRef.current?.measureInWindow((_x, y, _w, h) => {
           const overlap = Math.max(0, y + h - kbTop);
           setExtraBottom(overlap > 0 ? overlap + focusMargin : 0);
-          // Espera o novo padding ser aplicado antes de rolar.
           setTimeout(scrollFocusedIntoView, 120);
         });
       }, Platform.OS === "ios" ? 0 : 50);
@@ -112,9 +95,6 @@ const FormScrollView = forwardRef<ScrollView, Props>(function FormScrollView(
     };
   }, [focusMargin, scrollFocusedIntoView]);
 
-  // Ao trocar de campo com o teclado já aberto, o evento de "show" não
-  // dispara de novo; então observamos o campo em foco enquanto o teclado
-  // está visível.
   useEffect(() => {
     if (extraBottom === 0) return;
     const id = setInterval(() => {
