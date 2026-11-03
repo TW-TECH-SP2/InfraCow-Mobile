@@ -26,7 +26,12 @@ const videos: TutorialVideo[] = [
   {
     id: "3",
     name: "Aula 03 - Medir temperatura",
-
+    youtubeId: "KosaN4gu_qA",
+  },
+  {
+    id: "4",
+    name: "Aula 04 - Visualizando relatórios",
+    youtubeId: "sR0RvXY6J28",
   },
 ];
 
