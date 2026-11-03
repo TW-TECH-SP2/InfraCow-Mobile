@@ -468,11 +468,12 @@ export function maybeCreateNotification(medicao: any) {
 }
 
 export function getNotifications(): any[] {
-  return db.getAllSync<any>(`SELECT * FROM notificacoes ORDER BY datahora DESC`);
+  return db.getAllSync<any>(`SELECT * FROM notificacoes WHERE lida = 0 ORDER BY datahora DESC`);
 }
 
+
 export function deleteNotification(id: string) {
-  db.runSync(`DELETE FROM notificacoes WHERE id = ?`, [id]);
+  db.runSync(`UPDATE notificacoes SET lida = 1 WHERE id = ?`, [id]);
 }
 
 

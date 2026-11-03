@@ -64,13 +64,24 @@ export default function MeasureScreen() {
     runSync();
   };
 
+  const goBackToMeasureFlow = () => {
+    const names: string[] = navigation.getState().routes.map((r: any) => r.name);
+    if (names.includes("Measure")) {
+      navigation.popTo("Measure");
+    } else if (names.includes("MeasureSelectAnimal")) {
+      navigation.popTo("MeasureSelectAnimal", { farm });
+    } else {
+      navigation.popTo("Measure");
+    }
+  };
+
   const handleMeasure = async () => {
     if (isFinished(status)) {
       if (lastTemperature !== null && !recordSaved) {
         saveMeasurement(lastTemperature);
         setRecordSaved(true);
       }
-      navigation.navigate("Animal", { animal, farm });
+      goBackToMeasureFlow();
       return;
     }
 
