@@ -5,7 +5,12 @@ import {
   DriverType,
   Mode,
 } from "@serserm/react-native-turbo-serialport";
-import { getTempLevel } from "../utils/temperatureStatus";
+import {
+  getTempLevel,
+  TEMP_LOW_MAX,
+  TEMP_ATTENTION_MIN,
+  TEMP_HIGH_MIN,
+} from "../utils/temperatureStatus";
 
 export type MeasurementResult = {
   temperature: number;
@@ -19,9 +24,13 @@ type EspResponse = { leituras: EspReading[] };
 const BAUD_RATE = 115200;
 
 
-const SIMULAR_MEDICAO = false;
-const SIM_MIN = 35.0;
-const SIM_MAX = 37.0;
+const SIMULAR_MEDICAO = true;
+const SIM_RANGES: [number, number][] = [
+  [TEMP_LOW_MAX - 1, TEMP_LOW_MAX],                 // hipotermia 
+  [TEMP_LOW_MAX + 0.1, TEMP_ATTENTION_MIN - 0.1],   // normal 
+  [TEMP_ATTENTION_MIN, TEMP_HIGH_MIN - 0.1],        // quase febre 
+  [TEMP_HIGH_MIN, TEMP_HIGH_MIN + 1],               // febre 
+];
 
 const BOOT_WAIT_MS = 2500;
 const CONNECT_TIMEOUT_MS = 30000;
@@ -306,7 +315,8 @@ function requestMeasurement(): Promise<MeasurementResult> {
 
 async function simulateMeasurement(): Promise<MeasurementResult> {
   await sleep(1500);
-  const temperature = Number((SIM_MIN + Math.random() * (SIM_MAX - SIM_MIN)).toFixed(1));
+  const [min, max] = SIM_RANGES[Math.floor(Math.random() * SIM_RANGES.length)];
+  const temperature = Number((min + Math.random() * (max - min)).toFixed(1));
   return { temperature, ...classifyTemperature(temperature) };
 }
 
